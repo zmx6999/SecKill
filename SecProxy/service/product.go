@@ -31,9 +31,14 @@ func initProduct(secProxyContext *SecProxyContext) error {
 		return err
 	}
 
-	var productList []Product
+	productMap := make(map[string]Product)
 	for _, v := range r.Kvs{
-		json.Unmarshal(v.Value, &productList)
+		json.Unmarshal(v.Value, &productMap)
+	}
+
+	var productList []Product
+	for _, product := range productMap{
+		productList = append(productList, product)
 	}
 
 	updateProduct(secProxyContext, productList)
@@ -56,14 +61,26 @@ func watchProduct(secProxyContext *SecProxyContext) {
 
 	for  {
 		ch := cli.Watch(context.Background(), secProxyContext.EtcdConf.EtcdProductKey)
+		var productMap map[string]Product
 		for v := range ch{
-			var productList []Product
+			s := true
 			for _, ev := range v.Events{
 				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == secProxyContext.EtcdConf.EtcdProductKey {
-					json.Unmarshal(ev.Kv.Value, &productList)
+					err := json.Unmarshal(ev.Kv.Value, &productMap)
+					if err != nil {
+						s = false
+					}
 				}
 			}
-			updateProduct(secProxyContext, productList)
+
+			if s {
+				var productList []Product
+				for _, product := range productMap{
+					productList = append(productList, product)
+				}
+
+				updateProduct(secProxyContext, productList)
+			}
 		}
 	}
 }
@@ -111,7 +128,7 @@ func GetProduct(productId string) (data ProductInfo, code int, err error) {
 		data.Msg = ErrMsg[code]
 	}
 
-	if product.Status == ProductStatusSoldOut || product.Status == ProductStatusForceSoldOut {
+	if product.Status == ProductStatusSoldOut {
 		code = ProductSoldOutErr
 		data.Process = ProductProcessEnd
 		data.Msg = ErrMsg[code]
@@ -136,4 +153,16 @@ func GetProductList() (data []ProductInfo) {
 	}
 
 	return
+}
+
+func UpdateProductStatus(productId string, status int)  {
+	secProxyContext.ProductMapLock.Lock()
+	defer secProxyContext.ProductMapLock.Unlock()
+
+	product, ok := secProxyContext.ProductMap[productId]
+	if !ok {
+		return
+	}
+
+	product.Status = status
 }

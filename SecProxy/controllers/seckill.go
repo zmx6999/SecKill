@@ -93,12 +93,16 @@ func (this *SecKill) SecKill()  {
 	*/
 
 	r, code, err := service.SecKill(request)
+	if code == 1004 {
+		service.UpdateProductStatus(productId, service.ProductStatusSoldOut)
+	}
+
 	if err != nil {
 		this.error(code, err.Error())
 		return
 	}
 
-	if r["token"] == "" {
+	if r == nil || r["token"] == "" {
 		this.error(code, "seckill failed")
 		return
 	}

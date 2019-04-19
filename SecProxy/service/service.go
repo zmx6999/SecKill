@@ -4,7 +4,7 @@ import (
 	"time"
 	"fmt"
 	"sync"
-)
+	)
 
 /*
 func ValidateUser(request SecRequest) bool {
@@ -68,6 +68,9 @@ func SecKill(request *SecRequest) (data map[string]interface{}, code int, err er
 
 	_, code, err = GetProduct(request.ProductId)
 	if err != nil || code != OK {
+		if err == nil {
+			err = fmt.Errorf(ErrMsg[code])
+		}
 		return
 	}
 

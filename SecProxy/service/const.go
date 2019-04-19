@@ -2,8 +2,7 @@ package service
 
 const (
 	ProductStatusNormal = 0
-	ProductStatusSoldOut = 1
-	ProductStatusForceSoldOut = 2
+	ProductStatusSoldOut = 2001
 
 	ProductProcessNotStart = 0
 	ProductProcessStart = 1

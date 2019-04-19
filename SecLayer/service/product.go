@@ -6,7 +6,7 @@ import (
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"time"
 	"sync"
-)
+		)
 
 type ProductMgr struct {
 	ProductMap map[string]*Product
@@ -31,9 +31,14 @@ func loadProduct(secLayerContext *SecLayerContext) error {
 		return err
 	}
 
-	var productList []Product
+	productMap := make(map[string]Product)
 	for _, v := range r.Kvs{
-		json.Unmarshal(v.Value, &productList)
+		json.Unmarshal(v.Value, &productMap)
+	}
+
+	var productList []Product
+	for _, product := range productMap{
+		productList = append(productList, product)
 	}
 
 	updateProductMap(secLayerContext, productList)
@@ -60,19 +65,24 @@ func watchProduct(secLayerContext *SecLayerContext) {
 	key := secLayerContext.SecLayerConf.EtcdProductKey
 	for  {
 		r := secLayerContext.EtcdClient.Watch(context.Background(), key)
-		var productList []Product
-		s := true
+		var productMap map[string]Product
 		for v := range r{
+			s := true
 			for _, ev := range v.Events{
 				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == key {
-					err := json.Unmarshal(ev.Kv.Value, &productList)
+					err := json.Unmarshal(ev.Kv.Value, &productMap)
 					if err != nil {
-						s = true
+						s = false
 					}
 				}
 			}
 
 			if s {
+				var productList []Product
+				for _, product := range productMap{
+					productList = append(productList, product)
+				}
+
 				updateProductMap(secLayerContext, productList)
 			}
 		}
