@@ -7,18 +7,26 @@ type UserHistoryMgr struct {
 	UserHistoryLock sync.RWMutex
 }
 
+func newUserHistoryMgr() UserHistoryMgr {
+	return UserHistoryMgr{
+		UserHistoryMap: map[string]*UserHistory{},
+	}
+}
+
 type UserHistory struct {
-	history map[string]int
+	historyMap map[string]int
 }
 
-func NewUserHistory() (*UserHistory) {
-	return &UserHistory{history: map[string]int{}}
+func newUserHistory() *UserHistory {
+	return &UserHistory{
+		map[string]int{},
+	}
 }
 
-func (uh *UserHistory) Get(productId string) int {
-	return uh.history[productId]
+func (uh *UserHistory) Check(productId string) int {
+	return uh.historyMap[productId]
 }
 
-func (uh *UserHistory) Add(productId string, count int) {
-	uh.history[productId] += count
+func (uh *UserHistory) Add(productId string)  {
+	uh.historyMap[productId]++
 }

@@ -1,120 +1,91 @@
 package service
 
 import (
-	"time"
-	"fmt"
 	"sync"
-	)
-
-/*
-func ValidateUser(request SecRequest) bool {
-	secret := getUserSecret(request.UserId)
-	str := "user_id="+strconv.Itoa(request.UserId)+"&secret="+secret
-	authSign := GetSha256(str)
-	return request.UserAuthSign == authSign
-}
-*/
-
-type SecRequest struct {
-	ProductId string
-	UserId string
-	RemoteAddr string
-	UserAuthSign string
-	AccessTime time.Time
-	Source string
-	AuthCode string
-	Nonce string
-	SecTime time.Time
-	// ClientReference string
-	CloseNotify <-chan bool `json:"-"`
-
-	*ResponseChan `json:"-"`
-}
+	"fmt"
+	"time"
+)
 
 func NewSecRequest() *SecRequest {
 	return &SecRequest{
-		ResponseChan: newResponseChan(),
+		ResponseChan: make(chan *SecResponse, secProxyContext.ResponseChanSize),
 	}
-}
-
-type SecResponse struct {
-	ProductId string
-	UserId string
-	Token string
-	Code int
 }
 
 type ResponseChanMgr struct {
-	ResponseChanMap  map[string]*ResponseChan
-	ResponseChanMapLock sync.RWMutex
+	ResponseChanMap map[string]chan *SecResponse
+	Lock sync.RWMutex
 }
 
-type ResponseChan struct {
-	Chan chan *SecResponse
-	ChanLock sync.RWMutex
-}
-
-func newResponseChan() *ResponseChan {
-	return &ResponseChan{
-		Chan: make(chan *SecResponse, 1),
+func newResponseChanMgr() ResponseChanMgr {
+	return ResponseChanMgr{
+		ResponseChanMap: map[string]chan *SecResponse{},
 	}
 }
 
-func SecKill(request *SecRequest) (data map[string]interface{}, code int, err error) {
-	code, err = antiSpam(secProxyContext, request)
+func SecKill(req *SecRequest) (data map[string]interface{}, code int, err error) {
+	code, err = antiSpam(req)
 	if err != nil {
 		return
 	}
 
-	_, code, err = GetProduct(request.ProductId)
-	if err != nil || code != OK {
-		if err == nil {
-			err = fmt.Errorf(ErrMsg[code])
-		}
+	code, err = getProduct(req.ProductId)
+	if err != nil {
 		return
 	}
 
-	secProxyContext.ResponseChanMapLock.Lock()
+	secProxyContext.ResponseChanMgr.Lock.Lock()
 
-	key := request.UserId+"_"+request.ProductId
-	if _, ok := secProxyContext.ResponseChanMap[key]; ok {
+	key := fmt.Sprintf("%s_%s", req.UserId, req.ProductId)
+	_, ok := secProxyContext.ResponseChanMap[key]
+	if ok {
+		secProxyContext.ResponseChanMgr.Lock.Unlock()
 		code = NetworkBusyErr
-		err = fmt.Errorf(ErrMsg[code])
-		secProxyContext.ResponseChanMapLock.Unlock()
+		err = fmt.Errorf(getErrMsg(code))
 		return
 	}
-	secProxyContext.ResponseChanMap[key] = request.ResponseChan
+	secProxyContext.ResponseChanMap[key] = req.ResponseChan
 
-	secProxyContext.ResponseChanMapLock.Unlock()
-
-	secProxyContext.RequestChan <- request
-
-	timer := time.NewTicker(time.Second * 60)
+	secProxyContext.ResponseChanMgr.Lock.Unlock()
 
 	defer func() {
-		timer.Stop()
-		secProxyContext.ResponseChanMapLock.Lock()
+		secProxyContext.ResponseChanMgr.Lock.Lock()
 		delete(secProxyContext.ResponseChanMap, key)
-		secProxyContext.ResponseChanMapLock.Unlock()
+		secProxyContext.ResponseChanMgr.Lock.Unlock()
 	}()
 
+	timer := time.NewTicker(time.Second*time.Duration(secProxyContext.RequestChanTimeout))
 	select {
-	case <-timer.C:
+	case secProxyContext.RequestChan <- req:
+		timer.Stop()
+	case <- timer.C:
+		timer.Stop()
 		code = TimeoutErr
-		err = fmt.Errorf(ErrMsg[code])
+		err = fmt.Errorf(getErrMsg(code))
 		return
-	case <-request.CloseNotify:
-		code = ClientClosedErr
-		err = fmt.Errorf(ErrMsg[code])
+	}
+
+	timer = time.NewTicker(time.Second*time.Duration(secProxyContext.RequestTimeout))
+	select {
+	case <- timer.C:
+		timer.Stop()
+		code = TimeoutErr
+		err = fmt.Errorf(getErrMsg(code))
 		return
-	case res := <-request.ResponseChan.Chan:
+	case <- req.CloseNotify:
+		timer.Stop()
+		code = CloseRequestErr
+		err = fmt.Errorf(getErrMsg(code))
+		return
+	case res := <-req.ResponseChan:
+		timer.Stop()
 		code = res.Code
 		data = map[string]interface{}{}
 		data["product_id"] = res.ProductId
 		data["user_id"] = res.UserId
 		data["token"] = res.Token
+		data["token_time"] = res.TokenTime.Format("2006-01-02 15:04:05")
+		data["nonce"] = res.Nonce
 		return
 	}
-
-	return
 }

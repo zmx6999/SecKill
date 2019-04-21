@@ -1,20 +1,11 @@
 package service
 
 import (
-	"time"
 	"github.com/garyburd/redigo/redis"
 	"go.etcd.io/etcd/clientv3"
+	"time"
 	"sync"
 )
-
-type RedisConf struct {
-	RedisAddr string
-	RedisPassword string
-	RedisMaxIdle int
-	RedisMaxActive int
-	RedisIdleTimeout int
-	RedisQueueName string
-}
 
 type EtcdConf struct {
 	EtcdAddr string
@@ -23,26 +14,42 @@ type EtcdConf struct {
 }
 
 type SecLayerConf struct {
-	Proxy2LayerRedis RedisConf
-	Layer2ProxyRedis RedisConf
+	Proxy2LayerRedisConf RedisConf
+	Layer2ProxyRedisConf RedisConf
 	EtcdConf
 
-	WriteGoroutineNum int
 	ReadGoroutineNum int
+	WriteGoroutineNum int
 	HandleUserGoroutineNum int
+
+	RequestTimeout int
+	Read2HandleChanTimeout int
+	Handle2WriteChanTimeout int
+
 	Read2HandleChanSize int
 	Handle2WriteChanSize int
-	MaxRequestWaitTimeout int
 
-	Send2WriteChanTimeout int
-	Send2HandleChanTimeout int
-
-	LimitPeriod int
-	TokenPassword string
-
+	ProductSecSoldLimit int
 	ProductOnePersonBuyLimit int
-	ProductSecSoldMaxLimit int
-	ProductBuyRate float64
+	ProductSoldRate float64
+
+	LayerSecret string
+}
+
+type SecRequest struct {
+	UserId string
+	ProductId string
+	AccessTime time.Time
+	Nonce string
+}
+
+type SecResponse struct {
+	UserId    string
+	ProductId string
+	Code int
+	Token string
+	TokenTime time.Time
+	Nonce string
 }
 
 type SecLayerContext struct {
@@ -58,25 +65,4 @@ type SecLayerContext struct {
 
 	ProductMgr
 	UserHistoryMgr
-}
-
-type SecRequest struct {
-	ProductId string
-	Source string
-	AuthCode string
-	SecTime string
-	Nonce string
-	UserId string
-	UserAuthSign string
-	AccessTime time.Time
-	ClientAddr string
-	// ClientReference string
-}
-
-type SecResponse struct {
-	ProductId string
-	UserId string
-	Token string
-	TokenTime time.Time
-	Code int
 }

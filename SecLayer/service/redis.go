@@ -3,12 +3,22 @@ package service
 import (
 	"github.com/garyburd/redigo/redis"
 	"time"
+	"github.com/astaxie/beego"
 	"encoding/json"
 	"math/rand"
-			"fmt"
 	"crypto/sha256"
-	"github.com/astaxie/beego/logs"
+	"fmt"
+	"encoding/hex"
 )
+
+type RedisConf struct {
+	RedisAddr string
+	RedisPassword string
+	RedisMaxIdle int
+	RedisMaxActive int
+	RedisIdleTimeout int
+	RedisQueueName string
+}
 
 func initRedisPool(redisConf RedisConf) *redis.Pool {
 	return &redis.Pool{
@@ -21,37 +31,36 @@ func initRedisPool(redisConf RedisConf) *redis.Pool {
 	}
 }
 
-func initRedis(secLayerContext *SecLayerContext)  {
-	secLayerContext.Proxy2LayerRedisPool = initRedisPool(secLayerContext.SecLayerConf.Proxy2LayerRedis)
-	secLayerContext.Layer2ProxyRedisPool = initRedisPool(secLayerContext.SecLayerConf.Layer2ProxyRedis)
+func initRedis()  {
+	secLayerContext.Proxy2LayerRedisPool = initRedisPool(secLayerContext.Proxy2LayerRedisConf)
+	secLayerContext.Layer2ProxyRedisPool = initRedisPool(secLayerContext.Layer2ProxyRedisConf)
 }
 
-func run(secLayerContext *SecLayerContext)  {
-	for i := 0; i < secLayerContext.SecLayerConf.ReadGoroutineNum; i++ {
+func run()  {
+	for i := 0; i < secLayerContext.ReadGoroutineNum; i++ {
 		secLayerContext.WaitGroup.Add(1)
-		go handleReader(secLayerContext)
+		go handleRead()
 	}
-	for i := 0; i < secLayerContext.SecLayerConf.WriteGoroutineNum; i++ {
+	for i := 0; i < secLayerContext.WriteGoroutineNum; i++ {
 		secLayerContext.WaitGroup.Add(1)
-		go handleWriter(secLayerContext)
+		go handleWrite()
 	}
-	for i := 0; i < secLayerContext.SecLayerConf.HandleUserGoroutineNum; i++ {
+	for i := 0; i < secLayerContext.HandleUserGoroutineNum; i++ {
 		secLayerContext.WaitGroup.Add(1)
-		go handleUser(secLayerContext)
+		go handleUser()
 	}
 	secLayerContext.WaitGroup.Wait()
 }
 
-func handleReader(secLayerContext *SecLayerContext)  {
+func handleRead()  {
 	for  {
 		cnn := secLayerContext.Proxy2LayerRedisPool.Get()
-		r, err := cnn.Do("blpop", secLayerContext.SecLayerConf.Proxy2LayerRedis.RedisQueueName, 0)
+		r, err := cnn.Do("blpop", secLayerContext.Proxy2LayerRedisConf.RedisQueueName, 0)
+		cnn.Close()
 		if err != nil {
-			fmt.Println(time.Now().String(), "redis.go:49 failed to connect to redis ", err)
-			cnn.Close()
+			beego.Error(err)
 			continue
 		}
-		cnn.Close()
 
 		t, ok := r.([]interface{})
 		if !ok || len(t) < 2 {
@@ -66,136 +75,127 @@ func handleReader(secLayerContext *SecLayerContext)  {
 		var req SecRequest
 		err = json.Unmarshal(data, &req)
 		if err != nil {
+			beego.Error(err)
 			continue
 		}
-
-		fmt.Println(time.Now().String(), "redis.go:71 ", req)
 
 		now := time.Now()
-		if int(now.Sub(req.AccessTime).Seconds()) >= secLayerContext.SecLayerConf.MaxRequestWaitTimeout {
+		if now.Sub(req.AccessTime).Seconds() > float64(secLayerContext.RequestTimeout) {
 			continue
 		}
 
-		timer := time.NewTicker(time.Millisecond*time.Duration(secLayerContext.SecLayerConf.Send2HandleChanTimeout))
+		timer := time.NewTicker(time.Second*time.Duration(secLayerContext.Read2HandleChanTimeout))
 		select {
 		case secLayerContext.Read2HandleChan <- &req:
-		case <-timer.C:
-			fmt.Println(time.Now().String(), "redis.go:82 timeout")
-			continue
+			timer.Stop()
+		case <- timer.C:
+			timer.Stop()
 		}
 	}
 }
 
-func handleWriter(secLayerContext *SecLayerContext)  {
-	for res := range secLayerContext.Handle2WriteChan{
-		err := writeToRedis(secLayerContext, res)
+func handleWrite()  {
+	for rsp := range secLayerContext.Handle2WriteChan{
+		data, err := json.Marshal(rsp)
 		if err != nil {
+			beego.Error(err)
+			continue
+		}
+
+		cnn := secLayerContext.Layer2ProxyRedisPool.Get()
+		_, err = cnn.Do("rpush", secLayerContext.Layer2ProxyRedisConf.RedisQueueName, data)
+		cnn.Close()
+		if err != nil {
+			beego.Error(err)
 			continue
 		}
 	}
 }
 
-func writeToRedis(secLayerContext *SecLayerContext, res *SecResponse) error {
-	data, err := json.Marshal(res)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(time.Now().String(), "redis.go:103 ", res)
-
-	cnn := secLayerContext.Layer2ProxyRedisPool.Get()
-	defer cnn.Close()
-	_, err = cnn.Do("rpush", secLayerContext.SecLayerConf.Layer2ProxyRedis.RedisQueueName, data)
-	if err != nil {
-		fmt.Println(time.Now().String(), "redis.go:107 failed to connect to redis ", err)
-		return err
-	}
-
-	return nil
-}
-
-func handleUser(secLayerContext *SecLayerContext)  {
+func handleUser()  {
 	for req := range secLayerContext.Read2HandleChan{
-		res := handleSecKill(secLayerContext, req)
-		fmt.Println(time.Now().String(), "redis.go:119 ", res)
+		rsp := secKill(req)
 
-		timer := time.NewTicker(time.Millisecond*time.Duration(secLayerContext.SecLayerConf.Send2WriteChanTimeout))
+		timer := time.NewTicker(time.Second*time.Duration(secLayerContext.Handle2WriteChanTimeout))
 		select {
-		case secLayerContext.Handle2WriteChan <- res:
-		case <-timer.C:
-			fmt.Println(time.Now().String(), "redis.go:125 timeout")
-			continue
+		case secLayerContext.Handle2WriteChan <- rsp:
+			timer.Stop()
+		case <- timer.C:
+			timer.Stop()
 		}
 	}
 }
 
-func handleSecKill(secLayerContext *SecLayerContext, req *SecRequest) (res *SecResponse) {
-	res = &SecResponse{}
-	res.ProductId = req.ProductId
-	res.UserId = req.UserId
+func secKill(req *SecRequest) (rsp *SecResponse) {
+	rsp = &SecResponse{}
+	rsp.UserId = req.UserId
+	rsp.ProductId = req.ProductId
+	rsp.Nonce = req.Nonce
 
-	secLayerContext.ProductMapLock.Lock()
-	defer secLayerContext.ProductMapLock.Unlock()
+	secLayerContext.ProductLock.Lock()
+	defer secLayerContext.ProductLock.Unlock()
+
+	rate := rand.Float64()
+	if rate < secLayerContext.ProductSoldRate {
+		rsp.Code = NetworkBusyErr
+		return
+	}
 
 	now := time.Now()
-	if int(now.Sub(req.AccessTime).Seconds()) >= secLayerContext.SecLayerConf.MaxRequestWaitTimeout {
-		res.Code = ErrRetry
+	if now.Sub(req.AccessTime).Seconds() > float64(secLayerContext.RequestTimeout) {
+		rsp.Code = TimeoutErr
 		return
 	}
 
 	product, ok := secLayerContext.ProductMap[req.ProductId]
 	if !ok {
-		res.Code = ErrNotFoundProduct
+		rsp.Code = ProductNotFoundErr
 		return
 	}
+
 	if product.Status == ProductStatusSoldOut {
-		res.Code = ErrSoldOut
+		rsp.Code = ProductSoldOutErr
+		return
+	}
+
+	if product.Sold >= product.Total {
+		product.Status = ProductStatusSoldOut
+		rsp.Code = ProductSoldOutErr
+		return
+	}
+
+	secSoldNum := product.SecLimit.Check()
+	if secSoldNum >= secLayerContext.ProductSecSoldLimit {
+		rsp.Code = NetworkBusyErr
 		return
 	}
 
 	secLayerContext.UserHistoryLock.Lock()
 	defer secLayerContext.UserHistoryLock.Unlock()
 
-	userHistory, ok := secLayerContext.UserHistoryMgr.UserHistoryMap[req.UserId]
+	userHistory, ok := secLayerContext.UserHistoryMap[req.UserId]
 	if !ok {
-		userHistory = NewUserHistory()
-		secLayerContext.UserHistoryMgr.UserHistoryMap[req.UserId] = userHistory
+		userHistory = newUserHistory()
+		secLayerContext.UserHistoryMap[req.UserId] = userHistory
 	}
 
-	rate := rand.Float64()
-	if rate < secLayerContext.ProductBuyRate {
-		res.Code = ErrRetry
+	userBuyNum := userHistory.Check(req.ProductId)
+	if userBuyNum >= secLayerContext.ProductOnePersonBuyLimit {
+		rsp.Code = AlreadyBuyErr
 		return
 	}
 
-	alreadySoldCount := product.Limit.Check(now, secLayerContext.LimitPeriod)
-	if alreadySoldCount >= secLayerContext.ProductSecSoldMaxLimit {
-		res.Code = ErrServiceBusy
-		return
-	}
-
-	if product.Sold >= product.Total {
-		product.Status = ProductStatusSoldOut
-		res.Code = ErrSoldOut
-		return
-	}
-
-	historyCount := userHistory.Get(req.ProductId)
-
-	if historyCount >= secLayerContext.ProductOnePersonBuyLimit {
-		res.Code = ErrAlreadyBuy
-		return
-	}
-
-	logs.Info(product)
-
-	product.Limit.Count(now, secLayerContext.LimitPeriod)
 	product.Sold++
-	userHistory.Add(req.ProductId, 1)
+	product.SecLimit.Add()
+	userHistory.Add(req.ProductId)
 
-	res.Code = ErrSecKillSuccess
-	res.Token = fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("user_id=%s&product_id=%s&timestamp=%d&security=%s", res.UserId, res.ProductId, now.Unix(), secLayerContext.SecLayerConf.TokenPassword))))
-	res.TokenTime = now
+	rsp.Code = SecKillSuccess
+	rsp.TokenTime = now
+
+	str := fmt.Sprintf("user_id=%s&product_id=%s&timestamp=%d&nonce=%s&secret=%s", rsp.UserId, rsp.ProductId, rsp.TokenTime, rsp.Nonce, secLayerContext.LayerSecret)
+	hbyte := sha256.Sum256([]byte(str))
+	token := hex.EncodeToString(hbyte[:])
+	rsp.Token = token
 
 	return
 }

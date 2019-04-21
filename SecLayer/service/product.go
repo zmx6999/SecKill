@@ -1,89 +1,98 @@
 package service
 
 import (
-	"context"
-	"encoding/json"
-	"go.etcd.io/etcd/mvcc/mvccpb"
 	"time"
 	"sync"
-		)
-
-type ProductMgr struct {
-	ProductMap map[string]*Product
-	ProductMapLock sync.RWMutex
-}
+	"encoding/json"
+	"context"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/mvcc/mvccpb"
+)
 
 type Product struct {
 	ProductId string
 	StartTime time.Time
 	EndTime time.Time
 	Status int
-	Total int
 	Sold int
+	Total int
 
-	Limit *Limit
+	*SecLimit
 }
 
-func loadProduct(secLayerContext *SecLayerContext) error {
-	secLayerConf := secLayerContext.SecLayerConf
-	r, err := secLayerContext.EtcdClient.Get(context.Background(), secLayerConf.EtcdProductKey)
+type ProductMgr struct {
+	ProductMap map[string]*Product
+	ProductLock sync.RWMutex
+}
+
+/*
+func newProductMgr() ProductMgr {
+	return ProductMgr{
+		ProductMap: map[string]*Product{},
+	}
+}
+*/
+
+func loadProduct() error {
+	r, err := secLayerContext.EtcdClient.Get(context.Background(), secLayerContext.EtcdProductKey)
 	if err != nil {
 		return err
 	}
 
-	productMap := make(map[string]Product)
-	for _, v := range r.Kvs{
-		json.Unmarshal(v.Value, &productMap)
-	}
-
 	var productList []Product
-	for _, product := range productMap{
-		productList = append(productList, product)
+	for _, v := range r.Kvs{
+		err = json.Unmarshal(v.Value, &productList)
+		if err != nil {
+			continue
+		}
 	}
 
-	updateProductMap(secLayerContext, productList)
+	updateProduct(productList)
 
-	go watchProduct(secLayerContext)
+	go watchProduct()
 
 	return nil
 }
 
-func updateProductMap(secLayerContext *SecLayerContext, productList []Product)  {
-	productMap := make(map[string]*Product)
+func updateProduct(productList []Product)  {
+	productMap := map[string]*Product{}
 	for _, v := range productList{
 		product := v
-		product.Limit = &Limit{}
+		product.SecLimit = &SecLimit{}
 		productMap[product.ProductId] = &product
 	}
 
-	secLayerContext.ProductMapLock.Lock()
+	secLayerContext.ProductLock.Lock()
 	secLayerContext.ProductMap = productMap
-	secLayerContext.ProductMapLock.Unlock()
+	secLayerContext.ProductLock.Unlock()
 }
 
-func watchProduct(secLayerContext *SecLayerContext) {
-	key := secLayerContext.SecLayerConf.EtcdProductKey
+func watchProduct()  {
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{secLayerContext.EtcdAddr},
+		DialTimeout: time.Second*time.Duration(secLayerContext.EtcdTimeout),
+	})
+	if err != nil {
+		return
+	}
+	defer cli.Close()
+
 	for  {
-		r := secLayerContext.EtcdClient.Watch(context.Background(), key)
-		var productMap map[string]Product
-		for v := range r{
-			s := true
+		w := cli.Watch(context.Background(), secLayerContext.EtcdProductKey)
+		var productList []Product
+		for v := range w{
+			success := true
 			for _, ev := range v.Events{
-				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == key {
-					err := json.Unmarshal(ev.Kv.Value, &productMap)
+				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == secLayerContext.EtcdProductKey {
+					err = json.Unmarshal(ev.Kv.Value, &productList)
 					if err != nil {
-						s = false
+						success = false
 					}
 				}
 			}
 
-			if s {
-				var productList []Product
-				for _, product := range productMap{
-					productList = append(productList, product)
-				}
-
-				updateProductMap(secLayerContext, productList)
+			if success {
+				updateProduct(productList)
 			}
 		}
 	}

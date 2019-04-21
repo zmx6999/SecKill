@@ -4,107 +4,101 @@ import (
 	"time"
 	"sync"
 	"fmt"
-	)
+	"github.com/astaxie/beego"
+)
 
-type LimitMgr struct {
-	UserLimitMap map[string]*Limit
-	IPLimitMap map[string]*Limit
-	LimitMgrLock sync.RWMutex
+type UserLimitMgr struct {
+	UserLimitMap map[string]*UserLimit
+	IPLimitMap map[string]*UserLimit
+	Lock sync.RWMutex
 }
 
-func antiSpam(secProxyContext *SecProxyContext, req *SecRequest) (code int, err error) {
-	/*
-	secProxyContext.BlockLock.RLock()
-
-	_, ok := secProxyContext.UserBlockMap[req.UserId]
-	if ok {
-		secProxyContext.BlockLock.RUnlock()
-		return fmt.Errorf(ErrMsg[UserBlockErr])
+func newUserLimitMgr() UserLimitMgr {
+	return UserLimitMgr{
+		UserLimitMap: map[string]*UserLimit{},
+		IPLimitMap: map[string]*UserLimit{},
 	}
+}
 
-	_, ok = secProxyContext.IPBlockMap[req.RemoteAddr]
-	if ok {
-		secProxyContext.BlockLock.RUnlock()
-		return fmt.Errorf(ErrMsg[IPBlockErr])
-	}
+func antiSpam(req *SecRequest) (code int, err error) {
+	secProxyContext.UserLimitMgr.Lock.Lock()
 
-	secProxyContext.BlockLock.RUnlock()
-	*/
-
-	secProxyContext.LimitMgr.LimitMgrLock.Lock()
-
-	userLimit, ok := secProxyContext.LimitMgr.UserLimitMap[req.UserId]
+	userLimit, ok := secProxyContext.UserLimitMap[req.UserId]
 	if !ok {
-		userLimit = NewLimit()
-		secProxyContext.LimitMgr.UserLimitMap[req.UserId] = userLimit
+		userLimit = NewUserLimit()
+		secProxyContext.UserLimitMap[req.UserId] = userLimit
 	}
 
-	ipLimit, ok := secProxyContext.LimitMgr.IPLimitMap[req.RemoteAddr]
+	ipLimit, ok := secProxyContext.IPLimitMap[req.IP]
 	if !ok {
-		ipLimit = NewLimit()
-		secProxyContext.LimitMgr.IPLimitMap[req.RemoteAddr] = ipLimit
+		ipLimit = NewUserLimit()
+		secProxyContext.IPLimitMap[req.IP] = ipLimit
 	}
 
-	secProxyContext.LimitMgr.LimitMgrLock.Unlock()
+	secProxyContext.UserLimitMgr.Lock.Unlock()
 
-	userLimit.LimitLock.Lock()
-	defer userLimit.LimitLock.Unlock()
+	userLimit.Lock.Lock()
+	defer userLimit.Lock.Unlock()
 
-	now := time.Now()
-	userSecCount := userLimit.SecLimit.Check(now)
-	if userSecCount >= secProxyContext.AccessLimit.UserSecAccessLimit {
-		code =  NetworkBusyErr
-		err = fmt.Errorf(ErrMsg[code])
+	userSecNum := userLimit.SecLimit.Check()
+	if userSecNum >= secProxyContext.UserSecLimit {
+		beego.Info("UserSecLimit")
+		code = NetworkBusyErr
+		err = fmt.Errorf(getErrMsg(code))
 		return
 	}
 
-	userMinCount := userLimit.MinLimit.Check(now)
-	if userMinCount >= secProxyContext.AccessLimit.UserMinAccessLimit {
-		code =  NetworkBusyErr
-		err = fmt.Errorf(ErrMsg[code])
+	userMinNum := userLimit.MinLimit.Check()
+	if userMinNum >= secProxyContext.UserMinLimit {
+		beego.Info("UserMinLimit")
+		code = NetworkBusyErr
+		err = fmt.Errorf(getErrMsg(code))
 		return
 	}
 
-	ipLimit.LimitLock.Lock()
-	defer ipLimit.LimitLock.Unlock()
+	ipLimit.Lock.Lock()
+	defer ipLimit.Lock.Unlock()
 
-	ipSecCount := ipLimit.SecLimit.Check(now)
-	if ipSecCount >= secProxyContext.AccessLimit.IPSecAccessLimit {
-		code =  NetworkBusyErr
-		err = fmt.Errorf(ErrMsg[code])
+	ipSecNum := ipLimit.SecLimit.Check()
+	if ipSecNum >= secProxyContext.IPSecLimit {
+		beego.Info("IPSecLimit")
+		code = NetworkBusyErr
+		err = fmt.Errorf(getErrMsg(code))
 		return
 	}
 
-	ipMinCount := ipLimit.MinLimit.Check(now)
-	if ipMinCount >= secProxyContext.AccessLimit.IPMinAccessLimit {
-		code =  NetworkBusyErr
-		err = fmt.Errorf(ErrMsg[code])
+	ipMinNum := ipLimit.MinLimit.Check()
+	if ipMinNum >= secProxyContext.IPMinLimit {
+		beego.Info("IPMinLimit")
+		code = NetworkBusyErr
+		err = fmt.Errorf(getErrMsg(code))
 		return
 	}
 
-	secProxyContext.LimitMgr.UserLimitMap[req.UserId].SecLimit.Count(now)
-	secProxyContext.LimitMgr.UserLimitMap[req.UserId].MinLimit.Count(now)
-	secProxyContext.LimitMgr.IPLimitMap[req.RemoteAddr].SecLimit.Count(now)
-	secProxyContext.LimitMgr.IPLimitMap[req.RemoteAddr].MinLimit.Count(now)
+	userLimit.SecLimit.Add()
+	userLimit.MinLimit.Add()
+	ipLimit.SecLimit.Add()
+	ipLimit.MinLimit.Add()
+
 	return
 }
 
-type Limit struct {
+type UserLimit struct {
 	SecLimit TimeLimit
 	MinLimit TimeLimit
-	LimitLock sync.RWMutex
+	Lock sync.RWMutex
 }
 
-func NewLimit() *Limit {
-	return &Limit{
+func NewUserLimit() *UserLimit {
+	return &UserLimit{
 		SecLimit: &SecLimit{},
 		MinLimit: &MinLimit{},
 	}
 }
 
 type TimeLimit interface {
-	Check(now time.Time) int
-	Count(now time.Time)
+	Check() int
+	Add()
 }
 
 type SecLimit struct {
@@ -112,21 +106,22 @@ type SecLimit struct {
 	curTime time.Time
 }
 
-func (sl *SecLimit) Check(now time.Time) int {
-	if int(now.Sub(sl.curTime).Seconds()) > 1 {
+func (sl *SecLimit) Check() int {
+	now := time.Now()
+	if now.Sub(sl.curTime).Seconds() > 1 {
 		return 0
 	}
-
 	return sl.count
 }
 
-func (sl *SecLimit) Count(now time.Time)  {
-	if int(now.Sub(sl.curTime).Seconds()) > 1 {
+func (sl *SecLimit) Add()  {
+	now := time.Now()
+	if now.Sub(sl.curTime).Seconds() > 1 {
 		sl.count = 1
 		sl.curTime = now
-		return
+	} else {
+		sl.count++
 	}
-	sl.count++
 }
 
 type MinLimit struct {
@@ -134,19 +129,20 @@ type MinLimit struct {
 	curTime time.Time
 }
 
-func (ml *MinLimit) Check(now time.Time) int {
-	if int(now.Sub(ml.curTime).Seconds()) > 60 {
+func (ml *MinLimit) Check() int {
+	now := time.Now()
+	if now.Sub(ml.curTime).Seconds() > 60 {
 		return 0
 	}
-
 	return ml.count
 }
 
-func (ml *MinLimit) Count(now time.Time)  {
-	if int(now.Sub(ml.curTime).Seconds()) > 60 {
+func (ml *MinLimit) Add()  {
+	now := time.Now()
+	if now.Sub(ml.curTime).Seconds() > 60 {
 		ml.count = 1
 		ml.curTime = now
-		return
+	} else {
+		ml.count++
 	}
-	ml.count++
 }

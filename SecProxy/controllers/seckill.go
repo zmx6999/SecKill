@@ -1,99 +1,51 @@
 package controllers
 
 import (
-	"190414/SecProxy/service"
-	"strconv"
+	"190420/SecProxy/service"
 	"time"
 	"strings"
 )
 
-type SecKill struct {
+type SecKillController struct {
 	BaseController
 }
 
-func (this *SecKill) GetProduct()  {
-	productId := this.GetString("product_id")
-	if productId == "" {
-		data := service.GetProductList()
-		this.success(data)
-	} else {
-		data, code, err := service.GetProduct(productId)
-		if err != nil {
-			this.error(code, err.Error())
-		} else {
-			this.success(data)
-		}
-	}
-}
-
-/*
-func (this *SecKill) UserLogin()  {
-	data := this.getPostParamMap()
-	userId, err := strconv.Atoi(data["user_id"])
-	if err != nil {
-		code := service.InvalidRequestParamErr
-		this.error(code, service.ErrMsg[code])
+func (this *SecKillController) SecKill()  {
+	data := this.getPostParams()
+	productId, ok := data["product_id"].(string)
+	if !ok || productId == "" {
+		this.error(1011, "Invalid request param")
 		return
 	}
 
-	authStr := service.Login(userId)
-	this.Ctx.SetCookie("user_id", strconv.Itoa(userId))
-	this.Ctx.SetCookie("user_auth_sign", authStr)
-
-	this.success(nil)
-}
-*/
-
-func (this *SecKill) SecKill()  {
-	data := this.getPostParamMap()
-	productId := data["product_id"]
-	if productId == "" {
-		code := service.InvalidRequestParamErr
-		this.error(code, service.ErrMsg[code])
-		return
-	}
-	userId := data["user_id"]
-	if userId == "" {
-		code := service.InvalidRequestParamErr
-		this.error(code, service.ErrMsg[code])
+	userId, ok := data["user_id"].(string)
+	if !ok || userId == "" {
+		this.error(1011, "Invalid request param")
 		return
 	}
 
-	authCode := data["auth_code"]
-	nonce := data["nonce"]
-	secTime, _ := strconv.Atoi(data["sec_time"])
-	source := data["source"]
-	userAuthSign := data["user_auth_sign"]
-
-	request := service.NewSecRequest()
-	request.AuthCode = authCode
-	request.Nonce = nonce
-	request.SecTime = time.Unix(int64(secTime), 0)
-	request.Source = source
-	request.UserId = userId
-	request.UserAuthSign = userAuthSign
-	request.ProductId = productId
-	request.AccessTime = time.Now()
-	request.CloseNotify = this.Ctx.ResponseWriter.CloseNotify()
-
-	remoteAddr := this.Ctx.Request.RemoteAddr
-	if strings.Contains(remoteAddr, ":") {
-		request.RemoteAddr = strings.Split(remoteAddr, ":")[0]
-	} else {
-		request.RemoteAddr = remoteAddr
-	}
-
-	/*
-	valid := service.ValidateUser(request)
-	if !valid {
-		code := service.UserValidationErr
-		this.error(code, service.ErrMsg[code])
+	nonce, ok := data["nonce"].(string)
+	if !ok || nonce == "" {
+		this.error(1011, "Invalid request param")
 		return
 	}
-	*/
 
-	r, code, err := service.SecKill(request)
-	if code == 1004 {
+	req := service.NewSecRequest()
+	req.ProductId = productId
+	req.UserId = userId
+	req.Nonce = nonce
+	req.AccessTime = time.Now()
+
+	addr := this.Ctx.Request.RemoteAddr
+	if strings.Contains(addr, ":") {
+		addr = strings.Split(addr, ":")[0]
+	}
+	req.IP = addr
+
+	req.CloseNotify = this.Ctx.ResponseWriter.CloseNotify()
+
+	data, code, err := service.SecKill(req)
+	if code == service.ProductSoldOutErr {
 		service.UpdateProductStatus(productId, service.ProductStatusSoldOut)
 	}
 
@@ -102,10 +54,10 @@ func (this *SecKill) SecKill()  {
 		return
 	}
 
-	if r == nil || r["token"] == "" {
-		this.error(code, "seckill failed")
+	if code != service.SecKillSuccess {
+		this.error(code, service.GetErrMsg(code))
 		return
 	}
 
-	this.success(r)
+	this.success(data)
 }

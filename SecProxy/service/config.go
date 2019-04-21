@@ -1,18 +1,10 @@
 package service
 
 import (
-	"github.com/garyburd/redigo/redis"
+	"time"
+		"github.com/garyburd/redigo/redis"
 	"go.etcd.io/etcd/clientv3"
-	)
-
-type RedisConf struct {
-	RedisAddr string
-	RedisPassword string
-	RedisMaxIdle int
-	RedisMaxActive int
-	RedisIdleTimeout int
-	RedisQueueName string
-}
+)
 
 type EtcdConf struct {
 	EtcdAddr string
@@ -20,47 +12,57 @@ type EtcdConf struct {
 	EtcdProductKey string
 }
 
-type AccessLimit struct {
-	IPSecAccessLimit int
-	UserSecAccessLimit int
-	IPMinAccessLimit int
-	UserMinAccessLimit int
-}
-
 type SecProxyConf struct {
-	// RedisBlockConf RedisConf
-	RedisProxy2LayerConf RedisConf
-	RedisLayer2ProxyConf RedisConf
-
+	Proxy2LayerRedisConf RedisConf
+	Layer2ProxyRedisConf RedisConf
 	EtcdConf
-
-	AccessLimit
 
 	ReadGoroutineNum int
 	WriteGoroutineNum int
-	RequestChanSize int
 
-	// CookieSecretKey string
-	// ReferWhiteList []string
+	RequestTimeout int
+	RequestChanTimeout int
+	ResponseChanTimeout int
+
+	RequestChanSize int
+	ResponseChanSize int
+
+	UserMinLimit int
+	UserSecLimit int
+	IPMinLimit int
+	IPSecLimit int
+}
+
+type SecRequest struct {
+	UserId string
+	ProductId string
+	AccessTime time.Time
+	Nonce string
+	IP string
+
+	ResponseChan chan *SecResponse `json:"-"`
+	CloseNotify <- chan bool `json:"-"`
+}
+
+type SecResponse struct {
+	UserId    string
+	ProductId string
+	Code int
+	Token string
+	TokenTime time.Time
+	Nonce string
 }
 
 type SecProxyContext struct {
 	SecProxyConf
 
-	// BlockRedisPool *redis.Pool
 	Proxy2LayerRedisPool *redis.Pool
 	Layer2ProxyRedisPool *redis.Pool
 	EtcdClient *clientv3.Client
 
-	/*
-	UserBlockMap map[string]bool
-	IPBlockMap map[string]bool
-	BlockLock sync.RWMutex
-	*/
-
-	ProductMgr
-	LimitMgr
-
 	RequestChan chan *SecRequest
 	ResponseChanMgr
+
+	ProductMgr
+	UserLimitMgr
 }
