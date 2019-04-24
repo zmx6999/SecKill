@@ -27,6 +27,6 @@ func (uh *UserHistory) Check(productId string) int {
 	return uh.historyMap[productId]
 }
 
-func (uh *UserHistory) Add(productId string)  {
-	uh.historyMap[productId]++
+func (uh *UserHistory) Add(productId string, count int)  {
+	uh.historyMap[productId] += count
 }

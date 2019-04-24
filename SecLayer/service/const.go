@@ -7,7 +7,8 @@ const (
 	ProductNotFoundErr = 1003
 	ProductSoldOutErr = 1004
 	TimeoutErr = 1005
-	AlreadyBuyErr = 1006
+	PurchaseExceedErr = 1006
+	ProductNotEnoughErr = 1011
 
 	SecKillSuccess = 200
 )

@@ -104,6 +104,7 @@ func initSecLayerConf() error {
 		return err
 	}
 
+	/*
 	secLayerContext.ProductSecSoldLimit, err = conf.Int("product_sec_sold_limit")
 	if err != nil {
 		return err
@@ -116,6 +117,7 @@ func initSecLayerConf() error {
 	if err != nil {
 		return err
 	}
+	*/
 
 	secLayerContext.LayerSecret = conf.String("layer_secret")
 

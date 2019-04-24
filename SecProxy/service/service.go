@@ -82,6 +82,7 @@ func SecKill(req *SecRequest) (data map[string]interface{}, code int, err error)
 		code = res.Code
 		data = map[string]interface{}{}
 		data["product_id"] = res.ProductId
+		data["product_num"] = res.ProductNum
 		data["user_id"] = res.UserId
 		data["token"] = res.Token
 		data["token_time"] = res.TokenTime.Format("2006-01-02 15:04:05")

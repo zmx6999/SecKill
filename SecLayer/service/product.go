@@ -13,15 +13,24 @@ type Product struct {
 	ProductId string
 	StartTime time.Time
 	EndTime time.Time
-	Status int
-	Sold int
+	// Status int
+	// Sold int
 	Total int
 
 	*SecLimit
+	SecSoldLimit int
+	OnePersonBuyLimit int
+	SoldRate float64
+}
+
+type ProductSold struct {
+	Status int
+	Sold int
 }
 
 type ProductMgr struct {
 	ProductMap map[string]*Product
+	ProductSoldMap map[string]*ProductSold
 	ProductLock sync.RWMutex
 }
 
@@ -34,6 +43,8 @@ func newProductMgr() ProductMgr {
 */
 
 func loadProduct() error {
+	secLayerContext.ProductSoldMap = map[string]*ProductSold{}
+
 	r, err := secLayerContext.EtcdClient.Get(context.Background(), secLayerContext.EtcdProductKey)
 	if err != nil {
 		return err

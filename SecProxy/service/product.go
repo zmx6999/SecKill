@@ -15,7 +15,6 @@ type Product struct {
 	StartTime time.Time
 	EndTime time.Time
 	Status int
-	// Sold int
 	Total int
 }
 

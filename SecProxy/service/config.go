@@ -36,6 +36,7 @@ type SecProxyConf struct {
 type SecRequest struct {
 	UserId string
 	ProductId string
+	ProductNum int
 	AccessTime time.Time
 	Nonce string
 	IP string
@@ -47,6 +48,7 @@ type SecRequest struct {
 type SecResponse struct {
 	UserId    string
 	ProductId string
+	ProductNum int
 	Code int
 	Token string
 	TokenTime time.Time

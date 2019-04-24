@@ -12,6 +12,7 @@ const (
 	SecKillAlreadyEndErr = 1008
 	CloseRequestErr = 1009
 	ProductForceSoldOutErr = 1010
+	ProductNotEnoughErr = 1011
 
 	SecKillSuccess = 200
 )
@@ -21,12 +22,13 @@ var errMsg = map[int]string{
 	ProductNotFoundErr: "Product not found",
 	ProductSoldOutErr: "Product has been sold out",
 	TimeoutErr: "Timeout",
-	AlreadyBuyErr: "Purchase times exceed",
+	AlreadyBuyErr: "Purchase number exceed",
 	SecKillNotStartErr: "Second kill has not started",
 	SecKillAlreadyEndErr: "Second kill has already ended",
 	SecKillSuccess: "ok",
 	CloseRequestErr: "Request has been closed",
 	ProductForceSoldOutErr: "Product has been sold out",
+	ProductNotEnoughErr: "Product not enough",
 }
 
 func getErrMsg(code int) string {

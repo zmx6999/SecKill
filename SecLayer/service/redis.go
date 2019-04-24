@@ -130,16 +130,11 @@ func secKill(req *SecRequest) (rsp *SecResponse) {
 	rsp = &SecResponse{}
 	rsp.UserId = req.UserId
 	rsp.ProductId = req.ProductId
+	rsp.ProductNum = req.ProductNum
 	rsp.Nonce = req.Nonce
 
 	secLayerContext.ProductLock.Lock()
 	defer secLayerContext.ProductLock.Unlock()
-
-	rate := rand.Float64()
-	if rate < secLayerContext.ProductSoldRate {
-		rsp.Code = NetworkBusyErr
-		return
-	}
 
 	now := time.Now()
 	if now.Sub(req.AccessTime).Seconds() > float64(secLayerContext.RequestTimeout) {
@@ -153,20 +148,36 @@ func secKill(req *SecRequest) (rsp *SecResponse) {
 		return
 	}
 
-	if product.Status == ProductStatusSoldOut {
-		rsp.Code = ProductSoldOutErr
-		return
-	}
-
-	if product.Sold >= product.Total {
-		product.Status = ProductStatusSoldOut
-		rsp.Code = ProductSoldOutErr
+	rate := rand.Float64()
+	if rate < product.SoldRate {
+		rsp.Code = NetworkBusyErr
 		return
 	}
 
 	secSoldNum := product.SecLimit.Check()
-	if secSoldNum >= secLayerContext.ProductSecSoldLimit {
+	if secSoldNum >= product.SecSoldLimit {
 		rsp.Code = NetworkBusyErr
+		return
+	}
+
+	productSold, ok := secLayerContext.ProductSoldMap[req.ProductId]
+	if !ok {
+		productSold = &ProductSold{}
+		secLayerContext.ProductSoldMap[req.ProductId] = productSold
+	}
+
+	if productSold.Status == ProductStatusSoldOut {
+		rsp.Code = ProductSoldOutErr
+		return
+	}
+
+	if productSold.Sold >= product.Total {
+		productSold.Status = ProductStatusSoldOut
+		rsp.Code = ProductSoldOutErr
+		return
+	}
+	if productSold.Sold+req.ProductNum > product.Total {
+		rsp.Code = ProductNotEnoughErr
 		return
 	}
 
@@ -180,14 +191,14 @@ func secKill(req *SecRequest) (rsp *SecResponse) {
 	}
 
 	userBuyNum := userHistory.Check(req.ProductId)
-	if userBuyNum >= secLayerContext.ProductOnePersonBuyLimit {
-		rsp.Code = AlreadyBuyErr
+	if userBuyNum+req.ProductNum > product.OnePersonBuyLimit {
+		rsp.Code = PurchaseExceedErr
 		return
 	}
 
-	product.Sold++
+	productSold.Sold += req.ProductNum
 	product.SecLimit.Add()
-	userHistory.Add(req.ProductId)
+	userHistory.Add(req.ProductId, req.ProductNum)
 
 	rsp.Code = SecKillSuccess
 	rsp.TokenTime = now

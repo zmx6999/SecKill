@@ -29,9 +29,9 @@ type SecLayerConf struct {
 	Read2HandleChanSize int
 	Handle2WriteChanSize int
 
-	ProductSecSoldLimit int
-	ProductOnePersonBuyLimit int
-	ProductSoldRate float64
+	// ProductSecSoldLimit int
+	// ProductOnePersonBuyLimit int
+	// ProductSoldRate float64
 
 	LayerSecret string
 }
@@ -39,6 +39,7 @@ type SecLayerConf struct {
 type SecRequest struct {
 	UserId string
 	ProductId string
+	ProductNum int
 	AccessTime time.Time
 	Nonce string
 }
@@ -46,6 +47,7 @@ type SecRequest struct {
 type SecResponse struct {
 	UserId    string
 	ProductId string
+	ProductNum int
 	Code int
 	Token string
 	TokenTime time.Time
