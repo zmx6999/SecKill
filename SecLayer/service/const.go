@@ -3,12 +3,11 @@ package service
 const (
 	ProductStatusSoldOut = 2001
 
-	NetworkBusyErr = 1001
-	ProductNotFoundErr = 1003
-	ProductSoldOutErr = 1004
-	TimeoutErr = 1005
-	PurchaseExceedErr = 1006
-	ProductNotEnoughErr = 1011
-
-	SecKillSuccess = 200
+	NetworkBusy = 1001
+	SecKillSuccess = 1002
+	ProductNotFound = 1003
+	SoldOut = 1004
+	ProductNotEnough = 1005
+	PurchaseExceed = 1006
+	Timeout = 1007
 )

@@ -1,9 +1,9 @@
 package main
 
 import (
+	_ "190430/SecProxy/service"
 	"github.com/astaxie/beego"
-	_ "190420/SecProxy/service"
-	_ "190420/SecProxy/router"
+	_ "190430/SecProxy/router"
 )
 
 func main()  {

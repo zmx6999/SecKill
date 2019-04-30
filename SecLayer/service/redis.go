@@ -6,25 +6,25 @@ import (
 	"github.com/astaxie/beego"
 	"encoding/json"
 	"math/rand"
-	"crypto/sha256"
 	"fmt"
+	"crypto/sha256"
 	"encoding/hex"
 )
 
 type RedisConf struct {
 	RedisAddr string
 	RedisPassword string
-	RedisMaxIdle int
-	RedisMaxActive int
-	RedisIdleTimeout int
-	RedisQueueName string
+	MaxIdle int
+	MaxActive int
+	IdleTimeout int
+	QueueName string
 }
 
 func initRedisPool(redisConf RedisConf) *redis.Pool {
 	return &redis.Pool{
-		MaxIdle: redisConf.RedisMaxIdle,
-		MaxActive: redisConf.RedisMaxActive,
-		IdleTimeout: time.Second*time.Duration(redisConf.RedisIdleTimeout),
+		MaxIdle: redisConf.MaxIdle,
+		MaxActive: redisConf.MaxActive,
+		IdleTimeout: time.Second*time.Duration(redisConf.IdleTimeout),
 		Dial: func() (redis.Conn, error) {
 			return redis.Dial("tcp", redisConf.RedisAddr, redis.DialPassword(redisConf.RedisPassword))
 		},
@@ -32,30 +32,30 @@ func initRedisPool(redisConf RedisConf) *redis.Pool {
 }
 
 func initRedis()  {
-	secLayerContext.Proxy2LayerRedisPool = initRedisPool(secLayerContext.Proxy2LayerRedisConf)
-	secLayerContext.Layer2ProxyRedisPool = initRedisPool(secLayerContext.Layer2ProxyRedisConf)
+	secLayerContext.ProxyToLayerPool = initRedisPool(secLayerContext.ProxyToLayerConf)
+	secLayerContext.LayerToProxyPool = initRedisPool(secLayerContext.LayerToProxyConf)
 }
 
 func run()  {
-	for i := 0; i < secLayerContext.ReadGoroutineNum; i++ {
+	for i := 1; i <= secLayerContext.ReadGoroutineNum; i++ {
 		secLayerContext.WaitGroup.Add(1)
-		go handleRead()
+		go read()
 	}
-	for i := 0; i < secLayerContext.WriteGoroutineNum; i++ {
-		secLayerContext.WaitGroup.Add(1)
-		go handleWrite()
-	}
-	for i := 0; i < secLayerContext.HandleUserGoroutineNum; i++ {
+	for i := 1; i <= secLayerContext.HandleUserGoroutineNum; i++ {
 		secLayerContext.WaitGroup.Add(1)
 		go handleUser()
+	}
+	for i := 1; i <= secLayerContext.WriteGoroutineNum; i++ {
+		secLayerContext.WaitGroup.Add(1)
+		go write()
 	}
 	secLayerContext.WaitGroup.Wait()
 }
 
-func handleRead()  {
+func read()  {
 	for  {
-		cnn := secLayerContext.Proxy2LayerRedisPool.Get()
-		r, err := cnn.Do("blpop", secLayerContext.Proxy2LayerRedisConf.RedisQueueName, 0)
+		cnn := secLayerContext.ProxyToLayerPool.Get()
+		r, err := cnn.Do("blpop", secLayerContext.ProxyToLayerConf.QueueName, 0)
 		cnn.Close()
 		if err != nil {
 			beego.Error(err)
@@ -72,7 +72,7 @@ func handleRead()  {
 			continue
 		}
 
-		var req SecRequest
+		var req Request
 		err = json.Unmarshal(data, &req)
 		if err != nil {
 			beego.Error(err)
@@ -84,129 +84,122 @@ func handleRead()  {
 			continue
 		}
 
-		timer := time.NewTicker(time.Second*time.Duration(secLayerContext.Read2HandleChanTimeout))
+		timer := time.NewTicker(time.Second*time.Duration(secLayerContext.ReadToHandleChanTimeout))
 		select {
-		case secLayerContext.Read2HandleChan <- &req:
-			timer.Stop()
-		case <- timer.C:
-			timer.Stop()
+		case <-timer.C:
+		case secLayerContext.ReadToHandleChan<-&req:
 		}
-	}
-}
-
-func handleWrite()  {
-	for rsp := range secLayerContext.Handle2WriteChan{
-		data, err := json.Marshal(rsp)
-		if err != nil {
-			beego.Error(err)
-			continue
-		}
-
-		cnn := secLayerContext.Layer2ProxyRedisPool.Get()
-		_, err = cnn.Do("rpush", secLayerContext.Layer2ProxyRedisConf.RedisQueueName, data)
-		cnn.Close()
-		if err != nil {
-			beego.Error(err)
-			continue
-		}
+		timer.Stop()
 	}
 }
 
 func handleUser()  {
-	for req := range secLayerContext.Read2HandleChan{
-		rsp := secKill(req)
+	for req := range secLayerContext.ReadToHandleChan{
+		res := secKill(req)
 
-		timer := time.NewTicker(time.Second*time.Duration(secLayerContext.Handle2WriteChanTimeout))
+		timer := time.NewTicker(time.Second*time.Duration(secLayerContext.HandleToWriteChanTimeout))
 		select {
-		case secLayerContext.Handle2WriteChan <- rsp:
-			timer.Stop()
-		case <- timer.C:
-			timer.Stop()
+		case <-timer.C:
+		case secLayerContext.HandleToWriteChan<-res:
 		}
+		timer.Stop()
 	}
 }
 
-func secKill(req *SecRequest) (rsp *SecResponse) {
-	rsp = &SecResponse{}
-	rsp.UserId = req.UserId
-	rsp.ProductId = req.ProductId
-	rsp.ProductNum = req.ProductNum
-	rsp.Nonce = req.Nonce
+func secKill(req *Request) (res *Response) {
+	res = &Response{}
+	res.ProductId = req.ProductId
+	res.ProductNum = req.ProductNum
+	res.UserId = req.UserId
+	res.Nonce = req.Nonce
 
 	secLayerContext.ProductLock.Lock()
 	defer secLayerContext.ProductLock.Unlock()
 
 	now := time.Now()
 	if now.Sub(req.AccessTime).Seconds() > float64(secLayerContext.RequestTimeout) {
-		rsp.Code = TimeoutErr
+		res.Code = Timeout
 		return
 	}
 
 	product, ok := secLayerContext.ProductMap[req.ProductId]
 	if !ok {
-		rsp.Code = ProductNotFoundErr
+		res.Code = ProductNotFound
 		return
 	}
 
-	rate := rand.Float64()
-	if rate < product.SoldRate {
-		rsp.Code = NetworkBusyErr
+	if rand.Float64() < product.BuyRate {
+		beego.Info("buy rate")
+		res.Code = NetworkBusy
 		return
 	}
 
-	secSoldNum := product.SecLimit.Check()
-	if secSoldNum >= product.SecSoldLimit {
-		rsp.Code = NetworkBusyErr
+	if product.ProductLimit.Check() >= product.SecSoldLimit {
+		beego.Info("sold limit")
+		res.Code = NetworkBusy
 		return
 	}
 
-	productSold, ok := secLayerContext.ProductSoldMap[req.ProductId]
+	productExt, ok := secLayerContext.ProductExtMap[req.ProductId]
 	if !ok {
-		productSold = &ProductSold{}
-		secLayerContext.ProductSoldMap[req.ProductId] = productSold
+		productExt = &ProductExt{}
+		secLayerContext.ProductExtMap[req.ProductId] = productExt
 	}
 
-	if productSold.Status == ProductStatusSoldOut {
-		rsp.Code = ProductSoldOutErr
+	if productExt.Status == ProductStatusSoldOut {
+		res.Code = SoldOut
 		return
 	}
 
-	if productSold.Sold >= product.Total {
-		productSold.Status = ProductStatusSoldOut
-		rsp.Code = ProductSoldOutErr
-		return
-	}
-	if productSold.Sold+req.ProductNum > product.Total {
-		rsp.Code = ProductNotEnoughErr
+	if productExt.Sold >= product.Total {
+		productExt.Status = ProductStatusSoldOut
+		res.Code = SoldOut
 		return
 	}
 
-	secLayerContext.UserHistoryLock.Lock()
-	defer secLayerContext.UserHistoryLock.Unlock()
+	if productExt.Sold+req.ProductNum > product.Total {
+		res.Code = ProductNotEnough
+		return
+	}
 
-	userHistory, ok := secLayerContext.UserHistoryMap[req.UserId]
+	history, ok := secLayerContext.UserHistoryMap[req.UserId]
 	if !ok {
-		userHistory = newUserHistory()
-		secLayerContext.UserHistoryMap[req.UserId] = userHistory
+		history = NewUserHistory()
+		secLayerContext.UserHistoryMap[req.UserId] = history
 	}
 
-	userBuyNum := userHistory.Check(req.ProductId)
-	if userBuyNum+req.ProductNum > product.OnePersonBuyLimit {
-		rsp.Code = PurchaseExceedErr
+	if history.Check(req.ProductId)+req.ProductNum > product.OnePersonBuyLimit {
+		res.Code = PurchaseExceed
 		return
 	}
 
-	productSold.Sold += req.ProductNum
-	product.SecLimit.Add()
-	userHistory.Add(req.ProductId, req.ProductNum)
+	product.ProductLimit.Add()
+	productExt.Sold += req.ProductNum
+	history.Add(req.ProductId, req.ProductNum)
 
-	rsp.Code = SecKillSuccess
-	rsp.TokenTime = now
-
-	str := fmt.Sprintf("user_id=%s&product_id=%s&timestamp=%d&nonce=%s&secret=%s", rsp.UserId, rsp.ProductId, rsp.TokenTime, rsp.Nonce, secLayerContext.LayerSecret)
-	hbyte := sha256.Sum256([]byte(str))
-	token := hex.EncodeToString(hbyte[:])
-	rsp.Token = token
+	res.Code = SecKillSuccess
+	res.TokenTime = now
+	str := fmt.Sprintf("product_id=%s&user_id=%s&nonce=%s&timestamp=%d&secret=%s", res.ProductId, res.UserId, res.Nonce, res.TokenTime.Unix(), secLayerContext.LayerSecret)
+	h := sha256.Sum256([]byte(str))
+	res.Token = hex.EncodeToString(h[:])
 
 	return
+}
+
+func write()  {
+	for res := range secLayerContext.HandleToWriteChan{
+		data, err := json.Marshal(res)
+		if err != nil {
+			beego.Error(err)
+			continue
+		}
+
+		cnn := secLayerContext.LayerToProxyPool.Get()
+		_, err = cnn.Do("rpush", secLayerContext.LayerToProxyConf.QueueName, data)
+		cnn.Close()
+		if err != nil {
+			beego.Error(err)
+			continue
+		}
+	}
 }

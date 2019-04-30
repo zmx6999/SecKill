@@ -2,9 +2,9 @@ package router
 
 import (
 	"github.com/astaxie/beego"
-	"190420/SecProxy/controllers"
+	"190430/SecProxy/controller"
 )
 
 func init()  {
-	beego.Router("/seckill/seckill", &controllers.SecKillController{}, "post:SecKill")
+	beego.Router("/seckill", &controller.SecKillController{}, "POST:SecKill")
 }

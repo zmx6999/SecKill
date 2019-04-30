@@ -1,4 +1,4 @@
-package controllers
+package controller
 
 import (
 	"github.com/astaxie/beego"
@@ -16,20 +16,20 @@ type ResponseJSON struct {
 }
 
 func (this *BaseController) handleResponse(code int, msg string, data interface{})  {
-	this.Data["json"] = &ResponseJSON{Code: code, Msg: msg, Data: data}
+	this.Data["json"] = &ResponseJSON{code, msg, data}
 	this.ServeJSON()
 }
 
-func (this *BaseController) success(data interface{}) {
+func (this *BaseController) success(data interface{})  {
 	this.handleResponse(200, "ok", data)
 }
 
-func (this *BaseController) error(code int, msg string) {
+func (this *BaseController) error(code int, msg string)  {
 	this.handleResponse(code, msg, nil)
 }
 
-func (this *BaseController) getPostParams() (data map[string]interface{}) {
-	data = make(map[string]interface{})
-	json.Unmarshal(this.Ctx.Input.RequestBody, &data)
+func (this *BaseController) getPost() (data map[string]interface{}, err error) {
+	data = map[string]interface{}{}
+	err = json.Unmarshal(this.Ctx.Input.RequestBody, &data)
 	return
 }

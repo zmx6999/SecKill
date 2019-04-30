@@ -1,29 +1,111 @@
 package service
 
 import (
-	"sync"
-	"fmt"
 	"time"
+	"sync"
+	"github.com/astaxie/beego"
+	"fmt"
 )
 
-func NewSecRequest() *SecRequest {
-	return &SecRequest{
-		ResponseChan: make(chan *SecResponse, secProxyContext.ResponseChanSize),
+type Request struct {
+	ProductId string
+	ProductNum int
+	UserId string
+	IP string
+	Nonce string
+	AccessTime time.Time
+
+	ResponseChan chan *Response `json:"-"`
+	CloseNotify <-chan bool `json:"-"`
+}
+
+func NewRequest() *Request {
+	return &Request{
+		ResponseChan: make(chan *Response, secProxyContext.ResponseChanSize),
 	}
 }
 
-type ResponseChanMgr struct {
-	ResponseChanMap map[string]chan *SecResponse
-	Lock sync.RWMutex
+type ResponseMgr struct {
+	ResponseMap map[string]chan *Response
+	ResponseLock sync.RWMutex
 }
 
-func newResponseChanMgr() ResponseChanMgr {
-	return ResponseChanMgr{
-		ResponseChanMap: map[string]chan *SecResponse{},
+func NewResponseMgr() *ResponseMgr {
+	return &ResponseMgr{
+		ResponseMap: map[string]chan *Response{},
 	}
 }
 
-func SecKill(req *SecRequest) (data map[string]interface{}, code int, err error) {
+type Response struct {
+	ProductId string
+	ProductNum int
+	UserId string
+	Code int
+	Nonce string
+	TokenTime time.Time
+	Token string
+}
+
+func antiSpam(req *Request) (code int, err error) {
+	secProxyContext.LimitMgr.Lock.Lock()
+
+	userLimit, ok := secProxyContext.UserLimitMap[req.UserId]
+	if !ok {
+		userLimit = NewLimit()
+		secProxyContext.UserLimitMap[req.UserId] = userLimit
+	}
+
+	ipLimit, ok := secProxyContext.IPLimitMap[req.IP]
+	if !ok {
+		ipLimit = NewLimit()
+		secProxyContext.IPLimitMap[req.IP] = ipLimit
+	}
+
+	secProxyContext.LimitMgr.Lock.Unlock()
+
+	userLimit.Lock.Lock()
+	defer userLimit.Lock.Unlock()
+
+	if userLimit.SecLimit.Check() >= secProxyContext.UserSecLimit {
+		beego.Error("user sec")
+		code = NetworkBusy
+		err = fmt.Errorf(GetErrMsg(code))
+		return
+	}
+
+	if userLimit.MinLimit.Check() >= secProxyContext.UserMinLimit {
+		beego.Error("user min")
+		code = NetworkBusy
+		err = fmt.Errorf(GetErrMsg(code))
+		return
+	}
+
+	ipLimit.Lock.Lock()
+	defer ipLimit.Lock.Unlock()
+
+	if ipLimit.SecLimit.Check() >= secProxyContext.IPSecLimit {
+		beego.Error("ip sec")
+		code = NetworkBusy
+		err = fmt.Errorf(GetErrMsg(code))
+		return
+	}
+
+	if ipLimit.MinLimit.Check() >= secProxyContext.IPMinLimit {
+		beego.Error("ip min")
+		code = NetworkBusy
+		err = fmt.Errorf(GetErrMsg(code))
+		return
+	}
+
+	userLimit.SecLimit.Add()
+	userLimit.MinLimit.Add()
+	ipLimit.SecLimit.Add()
+	ipLimit.MinLimit.Add()
+
+	return
+}
+
+func SecKill(req *Request) (data map[string]interface{}, code int, err error) {
 	code, err = antiSpam(req)
 	if err != nil {
 		return
@@ -34,59 +116,52 @@ func SecKill(req *SecRequest) (data map[string]interface{}, code int, err error)
 		return
 	}
 
-	secProxyContext.ResponseChanMgr.Lock.Lock()
+	key := fmt.Sprintf("%s_%s", req.ProductId, req.UserId)
 
-	key := fmt.Sprintf("%s_%s", req.UserId, req.ProductId)
-	_, ok := secProxyContext.ResponseChanMap[key]
+	secProxyContext.ResponseLock.Lock()
+	_, ok := secProxyContext.ResponseMap[key]
 	if ok {
-		secProxyContext.ResponseChanMgr.Lock.Unlock()
-		code = NetworkBusyErr
-		err = fmt.Errorf(getErrMsg(code))
+		secProxyContext.ResponseLock.Unlock()
+		code = NetworkBusy
+		err = fmt.Errorf(GetErrMsg(code))
 		return
 	}
-	secProxyContext.ResponseChanMap[key] = req.ResponseChan
-
-	secProxyContext.ResponseChanMgr.Lock.Unlock()
-
-	defer func() {
-		secProxyContext.ResponseChanMgr.Lock.Lock()
-		delete(secProxyContext.ResponseChanMap, key)
-		secProxyContext.ResponseChanMgr.Lock.Unlock()
-	}()
+	secProxyContext.ResponseMap[key] = req.ResponseChan
+	secProxyContext.ResponseLock.Unlock()
 
 	timer := time.NewTicker(time.Second*time.Duration(secProxyContext.RequestChanTimeout))
 	select {
-	case secProxyContext.RequestChan <- req:
-		timer.Stop()
-	case <- timer.C:
-		timer.Stop()
-		code = TimeoutErr
-		err = fmt.Errorf(getErrMsg(code))
-		return
+	case <-timer.C:
+	case secProxyContext.RequestChan<-req:
 	}
+	timer.Stop()
 
 	timer = time.NewTicker(time.Second*time.Duration(secProxyContext.RequestTimeout))
+	defer func() {
+		timer.Stop()
+		secProxyContext.ResponseLock.Lock()
+		delete(secProxyContext.ResponseMap, key)
+		secProxyContext.ResponseLock.Unlock()
+	}()
+
 	select {
-	case <- timer.C:
-		timer.Stop()
-		code = TimeoutErr
-		err = fmt.Errorf(getErrMsg(code))
-		return
-	case <- req.CloseNotify:
-		timer.Stop()
-		code = CloseRequestErr
-		err = fmt.Errorf(getErrMsg(code))
+	case <-timer.C:
+		code = NetworkBusy
+		err = fmt.Errorf(GetErrMsg(code))
 		return
 	case res := <-req.ResponseChan:
-		timer.Stop()
 		code = res.Code
 		data = map[string]interface{}{}
 		data["product_id"] = res.ProductId
 		data["product_num"] = res.ProductNum
 		data["user_id"] = res.UserId
-		data["token"] = res.Token
-		data["token_time"] = res.TokenTime.Format("2006-01-02 15:04:05")
 		data["nonce"] = res.Nonce
+		data["token_time"] = res.TokenTime
+		data["token"] = res.Token
+		return
+	case <-req.CloseNotify:
+		code = RequestClose
+		err = fmt.Errorf(GetErrMsg(code))
 		return
 	}
 }

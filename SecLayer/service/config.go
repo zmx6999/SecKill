@@ -9,62 +9,58 @@ import (
 
 type EtcdConf struct {
 	EtcdAddr string
-	EtcdTimeout int
-	EtcdProductKey string
+	DialTimeout int
+	ProductKey string
 }
 
 type SecLayerConf struct {
-	Proxy2LayerRedisConf RedisConf
-	Layer2ProxyRedisConf RedisConf
+	ProxyToLayerConf RedisConf
+	LayerToProxyConf RedisConf
 	EtcdConf
 
 	ReadGoroutineNum int
-	WriteGoroutineNum int
 	HandleUserGoroutineNum int
+	WriteGoroutineNum int
 
 	RequestTimeout int
-	Read2HandleChanTimeout int
-	Handle2WriteChanTimeout int
+	ReadToHandleChanTimeout int
+	HandleToWriteChanTimeout int
 
-	Read2HandleChanSize int
-	Handle2WriteChanSize int
-
-	// ProductSecSoldLimit int
-	// ProductOnePersonBuyLimit int
-	// ProductSoldRate float64
+	ReadToHandleChanSize int
+	HandleToWriteChanSize int
 
 	LayerSecret string
 }
 
-type SecRequest struct {
-	UserId string
+type Request struct {
 	ProductId string
 	ProductNum int
-	AccessTime time.Time
+	UserId string
 	Nonce string
+	AccessTime time.Time
 }
 
-type SecResponse struct {
-	UserId    string
+type Response struct {
 	ProductId string
 	ProductNum int
+	UserId string
 	Code int
-	Token string
-	TokenTime time.Time
 	Nonce string
+	TokenTime time.Time
+	Token string
 }
 
 type SecLayerContext struct {
 	SecLayerConf
 
-	Proxy2LayerRedisPool *redis.Pool
-	Layer2ProxyRedisPool *redis.Pool
+	ProxyToLayerPool *redis.Pool
+	LayerToProxyPool *redis.Pool
 	EtcdClient *clientv3.Client
 
 	WaitGroup sync.WaitGroup
-	Read2HandleChan chan *SecRequest
-	Handle2WriteChan chan *SecResponse
+	ReadToHandleChan chan *Request
+	HandleToWriteChan chan *Response
 
-	ProductMgr
-	UserHistoryMgr
+	*ProductMgr
+	*UserHistoryMgr
 }

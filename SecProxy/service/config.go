@@ -1,21 +1,29 @@
 package service
 
 import (
-	"time"
-		"github.com/garyburd/redigo/redis"
+	"github.com/garyburd/redigo/redis"
 	"go.etcd.io/etcd/clientv3"
-)
+		)
 
 type EtcdConf struct {
 	EtcdAddr string
-	EtcdTimeout int
-	EtcdProductKey string
+	DialTimeout int
+	ProductKey string
+}
+
+type AccessLimitConf struct {
+	UserSecLimit int
+	UserMinLimit int
+	IPSecLimit int
+	IPMinLimit int
 }
 
 type SecProxyConf struct {
-	Proxy2LayerRedisConf RedisConf
-	Layer2ProxyRedisConf RedisConf
+	ProxyToLayerConf RedisConf
+	LayerToProxyConf RedisConf
 	EtcdConf
+
+	AccessLimitConf
 
 	ReadGoroutineNum int
 	WriteGoroutineNum int
@@ -26,45 +34,18 @@ type SecProxyConf struct {
 
 	RequestChanSize int
 	ResponseChanSize int
-
-	UserMinLimit int
-	UserSecLimit int
-	IPMinLimit int
-	IPSecLimit int
-}
-
-type SecRequest struct {
-	UserId string
-	ProductId string
-	ProductNum int
-	AccessTime time.Time
-	Nonce string
-	IP string
-
-	ResponseChan chan *SecResponse `json:"-"`
-	CloseNotify <- chan bool `json:"-"`
-}
-
-type SecResponse struct {
-	UserId    string
-	ProductId string
-	ProductNum int
-	Code int
-	Token string
-	TokenTime time.Time
-	Nonce string
 }
 
 type SecProxyContext struct {
 	SecProxyConf
 
-	Proxy2LayerRedisPool *redis.Pool
-	Layer2ProxyRedisPool *redis.Pool
+	ProxyToLayerPool *redis.Pool
+	LayerToProxyPool *redis.Pool
 	EtcdClient *clientv3.Client
 
-	RequestChan chan *SecRequest
-	ResponseChanMgr
+	RequestChan chan *Request
+	*ResponseMgr
 
-	ProductMgr
-	UserLimitMgr
+	*ProductMgr
+	*LimitMgr
 }

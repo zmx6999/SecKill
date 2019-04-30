@@ -11,120 +11,59 @@ var (
 	secLayerContext *SecLayerContext
 )
 
-func initEtcd(etcdConf EtcdConf) error {
+func initEtcd() (err error) {
 	cli, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{etcdConf.EtcdAddr},
-		DialTimeout: time.Second*time.Duration(etcdConf.EtcdTimeout),
+		Endpoints: []string{secLayerContext.EtcdAddr},
+		DialTimeout: time.Second*time.Duration(secLayerContext.DialTimeout),
 	})
 	if err != nil {
-		return err
+		return
 	}
 	secLayerContext.EtcdClient = cli
-
-	return nil
+	return
 }
 
-func initSecLayerConf() error {
+func initSecLayerConf() (err error) {
 	conf, err := config.NewConfig("ini", "conf/app.conf")
 	if err != nil {
-		return err
+		return
 	}
 
-	secLayerContext.Proxy2LayerRedisConf.RedisAddr = conf.String("proxy2layer_redis_addr")
-	secLayerContext.Proxy2LayerRedisConf.RedisPassword = conf.String("proxy2layer_redis_password")
-	secLayerContext.Proxy2LayerRedisConf.RedisQueueName = conf.String("proxy2layer_redis_queue_name")
-	secLayerContext.Proxy2LayerRedisConf.RedisMaxIdle, err = conf.Int("proxy2layer_redis_max_idle")
-	if err != nil {
-		return err
-	}
-	secLayerContext.Proxy2LayerRedisConf.RedisMaxActive, err = conf.Int("proxy2layer_redis_max_active")
-	if err != nil {
-		return err
-	}
-	secLayerContext.Proxy2LayerRedisConf.RedisIdleTimeout, err = conf.Int("proxy2layer_redis_idle_timeout")
-	if err != nil {
-		return err
-	}
+	secLayerContext.ProxyToLayerConf.RedisAddr = conf.String("proxy_layer_redis_addr")
+	secLayerContext.ProxyToLayerConf.RedisPassword = conf.String("proxy_layer_redis_password")
+	secLayerContext.ProxyToLayerConf.MaxIdle, err = conf.Int("proxy_layer_redis_max_idle")
+	secLayerContext.ProxyToLayerConf.MaxActive, err = conf.Int("proxy_layer_redis_max_active")
+	secLayerContext.ProxyToLayerConf.IdleTimeout, err = conf.Int("proxy_layer_redis_idle_timeout")
+	secLayerContext.ProxyToLayerConf.QueueName = conf.String("proxy_layer_redis_queue_name")
 
-	secLayerContext.Layer2ProxyRedisConf.RedisAddr = conf.String("layer2proxy_redis_addr")
-	secLayerContext.Layer2ProxyRedisConf.RedisPassword = conf.String("layer2proxy_redis_password")
-	secLayerContext.Layer2ProxyRedisConf.RedisQueueName = conf.String("layer2proxy_redis_queue_name")
-	secLayerContext.Layer2ProxyRedisConf.RedisMaxIdle, err = conf.Int("layer2proxy_redis_max_idle")
-	if err != nil {
-		return err
-	}
-	secLayerContext.Layer2ProxyRedisConf.RedisMaxActive, err = conf.Int("layer2proxy_redis_max_active")
-	if err != nil {
-		return err
-	}
-	secLayerContext.Layer2ProxyRedisConf.RedisIdleTimeout, err = conf.Int("layer2proxy_redis_idle_timeout")
-	if err != nil {
-		return err
-	}
+	secLayerContext.LayerToProxyConf.RedisAddr = conf.String("layer_proxy_redis_addr")
+	secLayerContext.LayerToProxyConf.RedisPassword = conf.String("layer_proxy_redis_password")
+	secLayerContext.LayerToProxyConf.MaxIdle, err = conf.Int("layer_proxy_redis_max_idle")
+	secLayerContext.LayerToProxyConf.MaxActive, err = conf.Int("layer_proxy_redis_max_active")
+	secLayerContext.LayerToProxyConf.IdleTimeout, err = conf.Int("layer_proxy_redis_idle_timeout")
+	secLayerContext.LayerToProxyConf.QueueName = conf.String("layer_proxy_redis_queue_name")
 
-	secLayerContext.EtcdAddr = conf.String("etcd_addr")
-	secLayerContext.EtcdProductKey = conf.String("etcd_product_key")
-	secLayerContext.EtcdTimeout, err = conf.Int("etcd_timeout")
-	if err != nil {
-		return err
-	}
+	secLayerContext.EtcdConf.EtcdAddr = conf.String("etcd_addr")
+	secLayerContext.EtcdConf.DialTimeout, err = conf.Int("etcd_dial_timeout")
+	secLayerContext.EtcdConf.ProductKey = conf.String("etcd_product_key")
 
 	secLayerContext.ReadGoroutineNum, err = conf.Int("read_goroutine_num")
-	if err != nil {
-		return err
-	}
-	secLayerContext.WriteGoroutineNum, err = conf.Int("write_goroutine_num")
-	if err != nil {
-		return err
-	}
 	secLayerContext.HandleUserGoroutineNum, err = conf.Int("handle_user_goroutine_num")
-	if err != nil {
-		return err
-	}
+	secLayerContext.WriteGoroutineNum, err = conf.Int("write_goroutine_num")
 
 	secLayerContext.RequestTimeout, err = conf.Int("request_timeout")
-	if err != nil {
-		return err
-	}
-	secLayerContext.Read2HandleChanTimeout, err = conf.Int("read2handle_chan_timeout")
-	if err != nil {
-		return err
-	}
-	secLayerContext.Handle2WriteChanTimeout, err = conf.Int("handle2write_chan_timeout")
-	if err != nil {
-		return err
-	}
+	secLayerContext.ReadToHandleChanTimeout, err = conf.Int("read_handle_chan_timeout")
+	secLayerContext.HandleToWriteChanTimeout, err = conf.Int("handle_write_chan_timeout")
 
-	secLayerContext.Read2HandleChanSize, err = conf.Int("read2handle_chan_size")
-	if err != nil {
-		return err
-	}
-	secLayerContext.Handle2WriteChanSize, err = conf.Int("handle2write_chan_size")
-	if err != nil {
-		return err
-	}
-
-	/*
-	secLayerContext.ProductSecSoldLimit, err = conf.Int("product_sec_sold_limit")
-	if err != nil {
-		return err
-	}
-	secLayerContext.ProductOnePersonBuyLimit, err = conf.Int("product_one_person_buy_limit")
-	if err != nil {
-		return err
-	}
-	secLayerContext.ProductSoldRate, err = conf.Float("product_sold_rate")
-	if err != nil {
-		return err
-	}
-	*/
+	secLayerContext.ReadToHandleChanSize, err = conf.Int("read_handle_chan_size")
+	secLayerContext.HandleToWriteChanSize, err = conf.Int("handle_write_chan_size")
 
 	secLayerContext.LayerSecret = conf.String("layer_secret")
 
-	return nil
+	return
 }
 
-func init() {
+func init()  {
 	secLayerContext = &SecLayerContext{}
 
 	err := initSecLayerConf()
@@ -135,23 +74,23 @@ func init() {
 
 	initRedis()
 
-	err = initEtcd(secLayerContext.EtcdConf)
+	err = initEtcd()
 	if err != nil {
 		beego.Error(err)
 		return
 	}
 
+	secLayerContext.ProductMgr = NewProductMgr()
 	err = loadProduct()
 	if err != nil {
 		beego.Error(err)
 		return
 	}
 
-	secLayerContext.Read2HandleChan = make(chan *SecRequest, secLayerContext.Read2HandleChanSize)
-	secLayerContext.Handle2WriteChan = make(chan *SecResponse, secLayerContext.Handle2WriteChanSize)
+	secLayerContext.ReadToHandleChan = make(chan *Request, secLayerContext.ReadToHandleChanSize)
+	secLayerContext.HandleToWriteChan = make(chan *Response, secLayerContext.HandleToWriteChanSize)
 
-	// secLayerContext.ProductMgr = newProductMgr()
-	secLayerContext.UserHistoryMgr = newUserHistoryMgr()
+	secLayerContext.UserHistoryMgr = NewUserHistoryMgr()
 
 	run()
 }

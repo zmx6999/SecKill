@@ -3,59 +3,45 @@ package service
 import (
 	"time"
 	"sync"
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"go.etcd.io/etcd/clientv3"
+	"github.com/astaxie/beego"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
-type Product struct {
-	ProductId string
-	StartTime time.Time
-	EndTime time.Time
-	// Status int
-	// Sold int
-	Total int
-
-	*SecLimit
-	SecSoldLimit int
-	OnePersonBuyLimit int
-	SoldRate float64
-}
-
-type ProductSold struct {
-	Status int
-	Sold int
-}
-
 type ProductMgr struct {
 	ProductMap map[string]*Product
-	ProductSoldMap map[string]*ProductSold
+	ProductExtMap map[string]*ProductExt
 	ProductLock sync.RWMutex
 }
 
-/*
-func newProductMgr() ProductMgr {
-	return ProductMgr{
+func NewProductMgr() *ProductMgr {
+	return &ProductMgr{
 		ProductMap: map[string]*Product{},
+		ProductExtMap: map[string]*ProductExt{},
 	}
 }
-*/
+
+type Product struct {
+	ProductId string
+	Total int
+
+	SecSoldLimit int
+	OnePersonBuyLimit int
+	BuyRate float64
+	*ProductLimit
+}
 
 func loadProduct() error {
-	secLayerContext.ProductSoldMap = map[string]*ProductSold{}
-
-	r, err := secLayerContext.EtcdClient.Get(context.Background(), secLayerContext.EtcdProductKey)
+	r, err := secLayerContext.EtcdClient.Get(context.Background(), secLayerContext.ProductKey)
 	if err != nil {
 		return err
 	}
 
 	var productList []Product
 	for _, v := range r.Kvs{
-		err = json.Unmarshal(v.Value, &productList)
-		if err != nil {
-			continue
-		}
+		json.Unmarshal(v.Value, &productList)
 	}
 
 	updateProduct(productList)
@@ -69,32 +55,33 @@ func updateProduct(productList []Product)  {
 	productMap := map[string]*Product{}
 	for _, v := range productList{
 		product := v
-		product.SecLimit = &SecLimit{}
+		product.ProductLimit = &ProductLimit{}
 		productMap[product.ProductId] = &product
 	}
 
 	secLayerContext.ProductLock.Lock()
+	defer secLayerContext.ProductLock.Unlock()
 	secLayerContext.ProductMap = productMap
-	secLayerContext.ProductLock.Unlock()
 }
 
 func watchProduct()  {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{secLayerContext.EtcdAddr},
-		DialTimeout: time.Second*time.Duration(secLayerContext.EtcdTimeout),
+		DialTimeout: time.Second*time.Duration(secLayerContext.DialTimeout),
 	})
 	if err != nil {
+		beego.Error(err)
 		return
 	}
 	defer cli.Close()
 
 	for  {
-		w := cli.Watch(context.Background(), secLayerContext.EtcdProductKey)
-		var productList []Product
+		w := cli.Watch(context.Background(), secLayerContext.ProductKey)
 		for v := range w{
+			var productList []Product
 			success := true
 			for _, ev := range v.Events{
-				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == secLayerContext.EtcdProductKey {
+				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == secLayerContext.ProductKey {
 					err = json.Unmarshal(ev.Kv.Value, &productList)
 					if err != nil {
 						success = false
@@ -107,4 +94,32 @@ func watchProduct()  {
 			}
 		}
 	}
+}
+
+type ProductExt struct {
+	Sold int
+	Status int
+}
+
+type ProductLimit struct {
+	count int
+	curTime time.Time
+}
+
+func (pl *ProductLimit) Check() int {
+	now := time.Now()
+	if now.Sub(pl.curTime).Seconds() > 1 {
+		return 0
+	}
+	return pl.count
+}
+
+func (pl *ProductLimit) Add() {
+	now := time.Now()
+	if now.Sub(pl.curTime).Seconds() > 1 {
+		pl.count = 1
+		pl.curTime = now
+		return
+	}
+	pl.count++
 }

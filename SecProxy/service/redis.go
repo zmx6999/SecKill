@@ -11,17 +11,17 @@ import (
 type RedisConf struct {
 	RedisAddr string
 	RedisPassword string
-	RedisMaxIdle int
-	RedisMaxActive int
-	RedisIdleTimeout int
-	RedisQueueName string
+	MaxIdle int
+	MaxActive int
+	IdleTimeout int
+	QueueName string
 }
 
 func initRedisPool(redisConf RedisConf) *redis.Pool {
 	return &redis.Pool{
-		MaxIdle: redisConf.RedisMaxIdle,
-		MaxActive: redisConf.RedisMaxActive,
-		IdleTimeout: time.Second*time.Duration(redisConf.RedisIdleTimeout),
+		MaxIdle: redisConf.MaxIdle,
+		MaxActive: redisConf.MaxActive,
+		IdleTimeout: time.Second*time.Duration(redisConf.IdleTimeout),
 		Dial: func() (redis.Conn, error) {
 			return redis.Dial("tcp", redisConf.RedisAddr, redis.DialPassword(redisConf.RedisPassword))
 		},
@@ -29,41 +29,23 @@ func initRedisPool(redisConf RedisConf) *redis.Pool {
 }
 
 func initRedis()  {
-	secProxyContext.Proxy2LayerRedisPool = initRedisPool(secProxyContext.Proxy2LayerRedisConf)
-	secProxyContext.Layer2ProxyRedisPool = initRedisPool(secProxyContext.Layer2ProxyRedisConf)
+	secProxyContext.ProxyToLayerPool = initRedisPool(secProxyContext.ProxyToLayerConf)
+	secProxyContext.LayerToProxyPool = initRedisPool(secProxyContext.LayerToProxyConf)
 }
 
 func run()  {
-	for i := 0; i < secProxyContext.ReadGoroutineNum; i++ {
-		go handleRead()
+	for i := 1; i <= secProxyContext.ReadGoroutineNum; i++ {
+		go read()
 	}
-	for i := 0; i < secProxyContext.WriteGoroutineNum; i++ {
-		go handleWrite()
-	}
-}
-
-func handleRead()  {
-	for req := range secProxyContext.RequestChan{
-		data, err := json.Marshal(req)
-		if err != nil {
-			beego.Error(err)
-			continue
-		}
-
-		cnn := secProxyContext.Proxy2LayerRedisPool.Get()
-		_, err = cnn.Do("rpush", secProxyContext.Proxy2LayerRedisConf.RedisQueueName, data)
-		cnn.Close()
-		if err != nil {
-			beego.Error(err)
-			continue
-		}
+	for i := 1; i <= secProxyContext.WriteGoroutineNum; i++ {
+		go write()
 	}
 }
 
-func handleWrite()  {
+func read()  {
 	for  {
-		cnn := secProxyContext.Layer2ProxyRedisPool.Get()
-		r, err := cnn.Do("blpop", secProxyContext.Layer2ProxyRedisConf.RedisQueueName, 0)
+		cnn := secProxyContext.LayerToProxyPool.Get()
+		r, err := cnn.Do("blpop", secProxyContext.LayerToProxyConf.QueueName, 0)
 		cnn.Close()
 		if err != nil {
 			beego.Error(err)
@@ -80,30 +62,44 @@ func handleWrite()  {
 			continue
 		}
 
-		var res SecResponse
+		var res Response
 		err = json.Unmarshal(data, &res)
 		if err != nil {
 			beego.Error(err)
 			continue
 		}
 
-		secProxyContext.ResponseChanMgr.Lock.RLock()
-
-		key := fmt.Sprintf("%s_%s", res.UserId, res.ProductId)
-		responseChan, ok := secProxyContext.ResponseChanMap[key]
+		key := fmt.Sprintf("%s_%s", res.ProductId, res.UserId)
+		secProxyContext.ResponseLock.RLock()
+		responseChan, ok := secProxyContext.ResponseMap[key]
+		secProxyContext.ResponseLock.RUnlock()
 		if !ok {
-			secProxyContext.ResponseChanMgr.Lock.RUnlock()
 			continue
 		}
 
-		secProxyContext.ResponseChanMgr.Lock.RUnlock()
-
 		timer := time.NewTicker(time.Second*time.Duration(secProxyContext.ResponseChanTimeout))
 		select {
-		case responseChan <- &res:
-			timer.Stop()
-		case <- timer.C:
-			timer.Stop()
+		case <-timer.C:
+		case responseChan<-&res:
+		}
+		timer.Stop()
+	}
+}
+
+func write()  {
+	for req := range secProxyContext.RequestChan{
+		data, err := json.Marshal(req)
+		if err != nil {
+			beego.Error(err)
+			continue
+		}
+
+		cnn := secProxyContext.ProxyToLayerPool.Get()
+		_, err = cnn.Do("rpush", secProxyContext.ProxyToLayerConf.QueueName, data)
+		cnn.Close()
+		if err != nil {
+			beego.Error(err)
+			continue
 		}
 	}
 }
