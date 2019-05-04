@@ -1,51 +1,51 @@
 package service
 
 import (
+	"time"
 	"github.com/garyburd/redigo/redis"
 	"go.etcd.io/etcd/clientv3"
-	"time"
 	"sync"
 )
 
 type EtcdConf struct {
 	EtcdAddr string
-	DialTimeout int
+	Timeout int
 	ProductKey string
 }
 
 type SecLayerConf struct {
-	ProxyToLayerConf RedisConf
-	LayerToProxyConf RedisConf
+	Proxy2LayerConf RedisConf
+	Layer2ProxyConf RedisConf
 	EtcdConf
 
 	ReadGoroutineNum int
-	HandleUserGoroutineNum int
+	HandleGoroutineNum int
 	WriteGoroutineNum int
 
 	RequestTimeout int
-	ReadToHandleChanTimeout int
-	HandleToWriteChanTimeout int
+	RequestChanTimeout int
+	ResponseChanTimeout int
 
-	ReadToHandleChanSize int
-	HandleToWriteChanSize int
+	RequestChanSize int
+	ResponseChanSize int
 
-	LayerSecret string
+	Secret string
 }
 
 type Request struct {
 	ProductId string
 	ProductNum int
 	UserId string
-	Nonce string
 	AccessTime time.Time
+	Nonce string
 }
 
 type Response struct {
-	ProductId string
-	ProductNum int
-	UserId string
 	Code int
-	Nonce string
+	ProductId  string
+	ProductNum int
+	UserId     string
+	Nonce      string
 	TokenTime time.Time
 	Token string
 }
@@ -53,14 +53,14 @@ type Response struct {
 type SecLayerContext struct {
 	SecLayerConf
 
-	ProxyToLayerPool *redis.Pool
-	LayerToProxyPool *redis.Pool
+	Proxy2LayerPool *redis.Pool
+	Layer2ProxyPool *redis.Pool
 	EtcdClient *clientv3.Client
 
-	WaitGroup sync.WaitGroup
-	ReadToHandleChan chan *Request
-	HandleToWriteChan chan *Response
-
 	*ProductMgr
-	*UserHistoryMgr
+	*HistoryMgr
+
+	WaitGroup sync.WaitGroup
+	RequestChan chan *Request
+	ResponseChan chan *Response
 }

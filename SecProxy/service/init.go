@@ -1,8 +1,8 @@
 package service
 
 import (
-	"time"
 	"go.etcd.io/etcd/clientv3"
+	"time"
 	"github.com/astaxie/beego/config"
 	"github.com/astaxie/beego"
 )
@@ -14,7 +14,7 @@ var (
 func initEtcd() (err error) {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{secProxyContext.EtcdAddr},
-		DialTimeout: time.Second*time.Duration(secProxyContext.DialTimeout),
+		DialTimeout: time.Second*time.Duration(secProxyContext.EtcdConf.Timeout),
 	})
 	if err != nil {
 		return
@@ -29,48 +29,99 @@ func initSecProxyConf() (err error) {
 		return
 	}
 
-	secProxyContext.ProxyToLayerConf.RedisAddr = conf.String("proxy_layer_redis_addr")
-	secProxyContext.ProxyToLayerConf.RedisPassword = conf.String("proxy_layer_redis_password")
-	secProxyContext.ProxyToLayerConf.MaxIdle, err = conf.Int("proxy_layer_redis_max_idle")
-	secProxyContext.ProxyToLayerConf.MaxActive, err = conf.Int("proxy_layer_redis_max_active")
-	secProxyContext.ProxyToLayerConf.IdleTimeout, err = conf.Int("proxy_layer_redis_idle_timeout")
-	secProxyContext.ProxyToLayerConf.QueueName = conf.String("proxy_layer_redis_queue_name")
+	secProxyContext.Proxy2LayerConf.RedisAddr = conf.String("proxy2layer_redis_addr")
+	secProxyContext.Proxy2LayerConf.Password = conf.String("proxy2layer_redis_password")
+	secProxyContext.Proxy2LayerConf.MaxActive, err = conf.Int("proxy2layer_redis_max_active")
+	if err != nil {
+		return
+	}
+	secProxyContext.Proxy2LayerConf.MaxIdle, err = conf.Int("proxy2layer_redis_max_idle")
+	if err != nil {
+		return
+	}
+	secProxyContext.Proxy2LayerConf.IdleTimeout, err = conf.Int("proxy2layer_redis_idle_timeout")
+	if err != nil {
+		return
+	}
+	secProxyContext.Proxy2LayerConf.QueueName = conf.String("proxy2layer_redis_queue_name")
 
-	secProxyContext.LayerToProxyConf.RedisAddr = conf.String("layer_proxy_redis_addr")
-	secProxyContext.LayerToProxyConf.RedisPassword = conf.String("layer_proxy_redis_password")
-	secProxyContext.LayerToProxyConf.MaxIdle, err = conf.Int("layer_proxy_redis_max_idle")
-	secProxyContext.LayerToProxyConf.MaxActive, err = conf.Int("layer_proxy_redis_max_active")
-	secProxyContext.LayerToProxyConf.IdleTimeout, err = conf.Int("layer_proxy_redis_idle_timeout")
-	secProxyContext.LayerToProxyConf.QueueName = conf.String("layer_proxy_redis_queue_name")
+	secProxyContext.Layer2ProxyConf.RedisAddr = conf.String("layer2proxy_redis_addr")
+	secProxyContext.Layer2ProxyConf.Password = conf.String("layer2proxy_redis_password")
+	secProxyContext.Layer2ProxyConf.MaxActive, err = conf.Int("layer2proxy_redis_max_active")
+	if err != nil {
+		return
+	}
+	secProxyContext.Layer2ProxyConf.MaxIdle, err = conf.Int("layer2proxy_redis_max_idle")
+	if err != nil {
+		return
+	}
+	secProxyContext.Layer2ProxyConf.IdleTimeout, err = conf.Int("layer2proxy_redis_idle_timeout")
+	if err != nil {
+		return
+	}
+	secProxyContext.Layer2ProxyConf.QueueName = conf.String("layer2proxy_redis_queue_name")
 
 	secProxyContext.EtcdConf.EtcdAddr = conf.String("etcd_addr")
-	secProxyContext.EtcdConf.DialTimeout, err = conf.Int("etcd_dial_timeout")
+	secProxyContext.EtcdConf.Timeout, err = conf.Int("etcd_timeout")
+	if err != nil {
+		return
+	}
 	secProxyContext.EtcdConf.ProductKey = conf.String("etcd_product_key")
 
-	secProxyContext.UserSecLimit, err = conf.Int("user_sec_limit")
-	secProxyContext.UserMinLimit, err = conf.Int("user_min_limit")
-	secProxyContext.IPSecLimit, err = conf.Int("ip_sec_limit")
-	secProxyContext.IPMinLimit, err = conf.Int("ip_min_limit")
+	secProxyContext.AccessLimitConf.UserSecAccessLimit, err = conf.Int("user_sec_access_limit")
+	if err != nil {
+		return
+	}
+	secProxyContext.AccessLimitConf.UserMinAccessLimit, err = conf.Int("user_min_access_limit")
+	if err != nil {
+		return
+	}
+	secProxyContext.AccessLimitConf.IPSecAccessLimit, err = conf.Int("ip_sec_access_limit")
+	if err != nil {
+		return
+	}
+	secProxyContext.AccessLimitConf.IPMinAccessLimit, err = conf.Int("ip_min_access_limit")
+	if err != nil {
+		return
+	}
 
 	secProxyContext.ReadGoroutineNum, err = conf.Int("read_goroutine_num")
+	if err != nil {
+		return
+	}
 	secProxyContext.WriteGoroutineNum, err = conf.Int("write_goroutine_num")
+	if err != nil {
+		return
+	}
 
 	secProxyContext.RequestTimeout, err = conf.Int("request_timeout")
+	if err != nil {
+		return
+	}
 	secProxyContext.RequestChanTimeout, err = conf.Int("request_chan_timeout")
+	if err != nil {
+		return
+	}
 	secProxyContext.ResponseChanTimeout, err = conf.Int("response_chan_timeout")
+	if err != nil {
+		return
+	}
 
 	secProxyContext.RequestChanSize, err = conf.Int("request_chan_size")
+	if err != nil {
+		return
+	}
 	secProxyContext.ResponseChanSize, err = conf.Int("response_chan_size")
+	if err != nil {
+		return
+	}
 
 	return
 }
 
-func init()  {
-	secProxyContext = &SecProxyContext{}
-
-	err := initSecProxyConf()
+func initSecProxyContext() (err error) {
+	err = initSecProxyConf()
 	if err != nil {
-		beego.Error(err)
 		return
 	}
 
@@ -78,21 +129,32 @@ func init()  {
 
 	err = initEtcd()
 	if err != nil {
-		beego.Error(err)
 		return
 	}
 
+	secProxyContext.AccessMgr = NewAccessMgr()
 	secProxyContext.ProductMgr = NewProductMgr()
-	err = loadProduct()
+
+	secProxyContext.RequestChan = make(chan *Request, secProxyContext.RequestChanSize)
+	secProxyContext.ResponseMgr = NewResponseMgr()
+
+	return
+}
+
+func init()  {
+	secProxyContext = &SecProxyContext{}
+
+	err := initSecProxyContext()
 	if err != nil {
 		beego.Error(err)
 		return
 	}
 
-	secProxyContext.LimitMgr = NewLimitMgr()
-
-	secProxyContext.RequestChan = make(chan *Request, secProxyContext.RequestChanSize)
-	secProxyContext.ResponseMgr = NewResponseMgr()
+	err = loadProduct()
+	if err != nil {
+		beego.Error(err)
+		return
+	}
 
 	run()
 }

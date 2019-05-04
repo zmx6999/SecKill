@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"go.etcd.io/etcd/clientv3"
-	"github.com/astaxie/beego"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"fmt"
 )
@@ -22,75 +21,71 @@ func NewProductMgr() *ProductMgr {
 	}
 }
 
-type Product struct {
-	ProductId string
-	ProductName string
-	Start time.Time
-	End time.Time
-	Status int
-	Total int
-}
-
-func loadProduct() error {
-	r, err := secProxyContext.EtcdClient.Get(context.Background(), secProxyContext.ProductKey)
+func loadProduct() (err error) {
+	r, err := secProxyContext.EtcdClient.Get(context.Background(), secProxyContext.EtcdConf.ProductKey)
 	if err != nil {
-		return err
+		return
 	}
 
 	var productList []Product
 	for _, v := range r.Kvs{
 		json.Unmarshal(v.Value, &productList)
 	}
-
 	updateProduct(productList)
 
 	go watchProduct()
 
-	return nil
+	return
 }
 
 func updateProduct(productList []Product)  {
 	productMap := map[string]*Product{}
-	for _, v := range productList{
+	for _, v := range productList {
 		product := v
 		productMap[product.ProductId] = &product
 	}
 
 	secProxyContext.ProductLock.Lock()
-	defer secProxyContext.ProductLock.Unlock()
 	secProxyContext.ProductMap = productMap
+	secProxyContext.ProductLock.Unlock()
 }
 
-func watchProduct()  {
+func watchProduct() (err error) {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{secProxyContext.EtcdAddr},
-		DialTimeout: time.Second*time.Duration(secProxyContext.DialTimeout),
+		DialTimeout: time.Second*time.Duration(secProxyContext.EtcdConf.Timeout),
 	})
 	if err != nil {
-		beego.Error(err)
 		return
 	}
 	defer cli.Close()
 
 	for  {
-		w := cli.Watch(context.Background(), secProxyContext.ProductKey)
+		w := cli.Watch(context.Background(), secProxyContext.EtcdConf.ProductKey)
+		var productList []Product
 		for v := range w{
-			var productList []Product
 			success := true
 			for _, ev := range v.Events{
-				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == secProxyContext.ProductKey {
+				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == secProxyContext.EtcdConf.ProductKey {
 					err = json.Unmarshal(ev.Kv.Value, &productList)
 					if err != nil {
 						success = false
 					}
 				}
 			}
-
 			if success {
 				updateProduct(productList)
 			}
 		}
 	}
+}
+
+type Product struct {
+	ProductId string
+	Total int
+	Start time.Time
+	End time.Time
+	Status int
 }
 
 func getProduct(productId string) (code int, err error) {
@@ -100,24 +95,25 @@ func getProduct(productId string) (code int, err error) {
 	product, ok := secProxyContext.ProductMap[productId]
 	if !ok {
 		code = ProductNotFound
-		err = fmt.Errorf(GetErrMsg(code))
+		err = fmt.Errorf(GetMsg(code))
+		return
+	}
+
+	if product.Status == ProductStatusSoldOut {
+		code = ProductForceSoldOut
+		err = fmt.Errorf(GetMsg(code))
 		return
 	}
 
 	now := time.Now()
 	if now.Sub(product.Start).Seconds() < 0 {
 		code = SecKillNotStart
-		err = fmt.Errorf(GetErrMsg(code))
+		err = fmt.Errorf(GetMsg(code))
 		return
 	}
 	if now.Sub(product.End).Seconds() > 0 {
 		code = SecKillEnd
-		err = fmt.Errorf(GetErrMsg(code))
-		return
-	}
-	if product.Status == ProductStatusSoldOut {
-		code = ForceSoldOut
-		err = fmt.Errorf(GetErrMsg(code))
+		err = fmt.Errorf(GetMsg(code))
 		return
 	}
 
@@ -126,6 +122,6 @@ func getProduct(productId string) (code int, err error) {
 
 func UpdateProductStatus(productId string, status int)  {
 	secProxyContext.ProductLock.Lock()
-	defer secProxyContext.ProductLock.Unlock()
 	secProxyContext.ProductMap[productId].Status = status
+	secProxyContext.ProductLock.Unlock()
 }

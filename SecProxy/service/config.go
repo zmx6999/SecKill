@@ -1,26 +1,26 @@
 package service
 
 import (
-	"github.com/garyburd/redigo/redis"
+		"github.com/garyburd/redigo/redis"
 	"go.etcd.io/etcd/clientv3"
-		)
+	)
 
 type EtcdConf struct {
 	EtcdAddr string
-	DialTimeout int
+	Timeout int
 	ProductKey string
 }
 
 type AccessLimitConf struct {
-	UserSecLimit int
-	UserMinLimit int
-	IPSecLimit int
-	IPMinLimit int
+	UserSecAccessLimit int
+	UserMinAccessLimit int
+	IPSecAccessLimit int
+	IPMinAccessLimit int
 }
 
 type SecProxyConf struct {
-	ProxyToLayerConf RedisConf
-	LayerToProxyConf RedisConf
+	Proxy2LayerConf RedisConf
+	Layer2ProxyConf RedisConf
 	EtcdConf
 
 	AccessLimitConf
@@ -39,13 +39,13 @@ type SecProxyConf struct {
 type SecProxyContext struct {
 	SecProxyConf
 
-	ProxyToLayerPool *redis.Pool
-	LayerToProxyPool *redis.Pool
+	Proxy2LayerPool *redis.Pool
+	Layer2ProxyPool *redis.Pool
 	EtcdClient *clientv3.Client
+
+	*ProductMgr
+	*AccessMgr
 
 	RequestChan chan *Request
 	*ResponseMgr
-
-	*ProductMgr
-	*LimitMgr
 }

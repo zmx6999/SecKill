@@ -2,19 +2,19 @@ package service
 
 import "sync"
 
-type UserHistoryMgr struct {
+type HistoryMgr struct {
 	UserHistoryMap map[string]*UserHistory
 	UserHistoryLock sync.RWMutex
 }
 
-func NewUserHistoryMgr() *UserHistoryMgr {
-	return &UserHistoryMgr{
+func NewHistoryMgr() *HistoryMgr {
+	return &HistoryMgr{
 		UserHistoryMap: map[string]*UserHistory{},
 	}
 }
 
 type UserHistory struct {
-	historyMap map[string]int
+	buyProductMap map[string]int
 }
 
 func NewUserHistory() *UserHistory {
@@ -24,9 +24,9 @@ func NewUserHistory() *UserHistory {
 }
 
 func (uh *UserHistory) Check(productId string) int {
-	return uh.historyMap[productId]
+	return uh.buyProductMap[productId]
 }
 
 func (uh *UserHistory) Add(productId string, num int)  {
-	uh.historyMap[productId] += num
+	uh.buyProductMap[productId] += num
 }

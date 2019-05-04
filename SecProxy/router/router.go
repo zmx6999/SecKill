@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/astaxie/beego"
-	"190430/SecProxy/controller"
+	"190504/SecProxy/controller"
 )
 
 func init()  {

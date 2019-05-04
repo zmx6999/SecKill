@@ -1,51 +1,42 @@
 package service
 
 import (
-	"time"
 	"github.com/garyburd/redigo/redis"
-	"encoding/json"
+	"time"
 	"github.com/astaxie/beego"
+	"encoding/json"
 	"fmt"
 )
 
 type RedisConf struct {
 	RedisAddr string
-	RedisPassword string
-	MaxIdle int
+	Password string
 	MaxActive int
+	MaxIdle int
 	IdleTimeout int
 	QueueName string
 }
 
 func initRedisPool(redisConf RedisConf) *redis.Pool {
 	return &redis.Pool{
-		MaxIdle: redisConf.MaxIdle,
 		MaxActive: redisConf.MaxActive,
+		MaxIdle: redisConf.MaxIdle,
 		IdleTimeout: time.Second*time.Duration(redisConf.IdleTimeout),
 		Dial: func() (redis.Conn, error) {
-			return redis.Dial("tcp", redisConf.RedisAddr, redis.DialPassword(redisConf.RedisPassword))
+			return redis.Dial("tcp", redisConf.RedisAddr, redis.DialPassword(redisConf.Password))
 		},
 	}
 }
 
 func initRedis()  {
-	secProxyContext.ProxyToLayerPool = initRedisPool(secProxyContext.ProxyToLayerConf)
-	secProxyContext.LayerToProxyPool = initRedisPool(secProxyContext.LayerToProxyConf)
-}
-
-func run()  {
-	for i := 1; i <= secProxyContext.ReadGoroutineNum; i++ {
-		go read()
-	}
-	for i := 1; i <= secProxyContext.WriteGoroutineNum; i++ {
-		go write()
-	}
+	secProxyContext.Proxy2LayerPool = initRedisPool(secProxyContext.Proxy2LayerConf)
+	secProxyContext.Layer2ProxyPool = initRedisPool(secProxyContext.Layer2ProxyConf)
 }
 
 func read()  {
 	for  {
-		cnn := secProxyContext.LayerToProxyPool.Get()
-		r, err := cnn.Do("blpop", secProxyContext.LayerToProxyConf.QueueName, 0)
+		cnn := secProxyContext.Layer2ProxyPool.Get()
+		r, err := cnn.Do("blpop", secProxyContext.Layer2ProxyConf.QueueName, 0)
 		cnn.Close()
 		if err != nil {
 			beego.Error(err)
@@ -94,12 +85,21 @@ func write()  {
 			continue
 		}
 
-		cnn := secProxyContext.ProxyToLayerPool.Get()
-		_, err = cnn.Do("rpush", secProxyContext.ProxyToLayerConf.QueueName, data)
+		cnn := secProxyContext.Proxy2LayerPool.Get()
+		_, err = cnn.Do("rpush", secProxyContext.Proxy2LayerConf.QueueName, data)
 		cnn.Close()
 		if err != nil {
 			beego.Error(err)
 			continue
 		}
+	}
+}
+
+func run()  {
+	for i := 1; i <= secProxyContext.ReadGoroutineNum; i++ {
+		go read()
+	}
+	for i := 1; i <= secProxyContext.WriteGoroutineNum; i++ {
+		go write()
 	}
 }

@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"190430/SecProxy/service"
+	"190504/SecProxy/service"
 	"time"
 	"strings"
 )
@@ -11,65 +11,69 @@ type SecKillController struct {
 }
 
 func (this *SecKillController) SecKill()  {
-	data, err := this.getPost()
-	if err != nil {
-		this.error(1020, "Invalid param")
-		return
-	}
-
+	data := this.getPost()
 	productId, ok := data["product_id"].(string)
 	if !ok {
-		this.error(1020, "Invalid param")
-		return
-	}
-
-	userId, ok := data["user_id"].(string)
-	if !ok {
-		this.error(1020, "Invalid param")
+		code := service.InvalidRequest
+		this.error(code, service.GetMsg(code))
 		return
 	}
 
 	_productNum, ok := data["product_num"].(float64)
 	if !ok {
-		this.error(1020, "Invalid param")
+		code := service.InvalidRequest
+		this.error(code, service.GetMsg(code))
 		return
 	}
 	productNum := int(_productNum)
 	if productNum < 1 {
-		this.error(1020, "Invalid param")
+		code := service.InvalidRequest
+		this.error(code, service.GetMsg(code))
+		return
+	}
+
+	userId, ok := data["user_id"].(string)
+	if !ok {
+		code := service.InvalidRequest
+		this.error(code, service.GetMsg(code))
 		return
 	}
 
 	nonce, ok := data["nonce"].(string)
 	if !ok {
-		this.error(1020, "Invalid param")
+		code := service.InvalidRequest
+		this.error(code, service.GetMsg(code))
+		return
+	}
+
+	addr := this.Ctx.Request.RemoteAddr
+	if !strings.Contains(addr, ":") {
+		code := service.InvalidRequest
+		this.error(code, service.GetMsg(code))
 		return
 	}
 
 	request := service.NewRequest()
-	ip := this.Ctx.Request.RemoteAddr
-	if strings.Contains(ip, ":") {
-		request.IP = strings.Split(ip, ":")[0]
-	}
 	request.ProductId = productId
 	request.ProductNum = productNum
+	request.IP = strings.Split(addr, ":")[0]
 	request.UserId = userId
 	request.Nonce = nonce
 	request.AccessTime = time.Now()
 	request.CloseNotify = this.Ctx.ResponseWriter.CloseNotify()
 
-	data, code, err := service.SecKill(request)
-	if code == service.SoldOut {
-		service.UpdateProductStatus(productId, service.ProductStatusSoldOut)
+	r, code, err := service.SecKill(request)
+	if code == service.ProductSoldOut {
+		service.UpdateProductStatus(request.ProductId, service.ProductStatusSoldOut)
 	}
 	if err != nil {
 		this.error(code, err.Error())
 		return
 	}
-	if data["token"] == "" {
-		this.error(code, service.GetErrMsg(code))
+	if r["token"] == "" {
+		this.error(code, service.GetMsg(code))
 		return
 	}
 
-	this.success(data)
+	this.success(r)
 }
